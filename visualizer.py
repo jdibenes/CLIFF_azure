@@ -109,7 +109,7 @@ class vsv:
     def face_solver(self, origin, direction):
         point, rid, tid = self._mesh.ray.intersects_location(origin.T, direction.T, multiple_hits=False)
         face = self._mesh.faces[tid]
-        return point.T, face[0] if (len(rid) > 0) else None
+        return (point.T, face[0]) if (len(rid) > 0) else (None, None)
     
     def surface_solver(self, origin_vertex_index, radius):
         vertices  = self._mesh.vertices
@@ -136,8 +136,7 @@ class vsv:
         vertex_faces = self._mesh.vertex_faces
         face_indices_selected = set()
         for vertex_index in vertex_indices:
-            for i in range(0, vertex_faces.shape[1]):
-                face_index = vertex_faces[vertex_index, i]
+            for face_index in vertex_faces[vertex_index, :]:
                 if (face_index < 0):
                     break
                 face_indices_selected.add(face_index)
@@ -154,24 +153,13 @@ class vsv:
                 face_indices_complete.add(face_index)
         vertex_indices_keep = []
         for vertex_index in vertex_indices:
-            for i in range(0, vertex_faces.shape[1]):
-                face_index = vertex_faces[vertex_index, i]
+            for face_index in vertex_faces[vertex_index, :]:
                 if (face_index < 0):
                     break
                 if (face_index in face_indices_complete):
                     vertex_indices_keep.append(vertex_index)
                     break
         return vertex_indices_keep
-
-
-
-
-            
-
-
-        
-
-
 
     def focus_foot(self, bigtoe, smalltoe, ankle, heel):
         left  = self.cross(ankle - heel, bigtoe - ankle)
@@ -257,17 +245,6 @@ class vsv:
         points = np.hstack((shoulder, elbow))        
 
         return self.focus_solver(left, up, front, center, points)
-    
-
-    
-
-
-
-
-
-
-
-
 
     def focus_left_foot(self):
         bigtoe   = self.get_joint(19)
@@ -407,7 +384,6 @@ class vsv:
              RAnkle                 LAnkle
     RSmallToe RHeel RBigToe LBigToe LHeel LSmallToe
     '''
-    #face front: (LEar-REar) X (REar-neck)
     '''
     'OP Nose', # 0
     'OP Neck', # 1
@@ -434,36 +410,8 @@ class vsv:
     'OP RBigToe', # 22
     'OP RSmallToe', # 23
     'OP RHeel', # 24
-    '''
-        
+    '''  
 
-
-
-        #(ankle-knee) X (knee-hip)
-    
-    
-    
-    
-
-
-
-    
-
-    
-
-
-
-        
-    
-'OP LBigToe', # 19
-
-'OP LAnkle', # 14
-'OP LKnee', # 13
-
-'OP RBigToe', # 22
-'OP RAnkle', # 11
-'OP RKnee', # 10
-        
 # NO: small toe, heel
 # foot side in: (heel-ankle) X (bigtoe-ankle) !
 # lower leg side in: (bigtoe-ankle) x (knee-ankle)
@@ -473,287 +421,3 @@ class vsv:
 # upper arm side in: (wrist-elbow) X (shoulder-elbow)
 # lower arm: no
 # hand: no
-
-# Create high-level front-sides-back mapping for body regions
-
-'''
-'OP Nose', # 0
-'OP Neck', # 1
-'OP RShoulder', # 2
-'OP RElbow', # 3
-'OP RWrist', # 4
-'OP LShoulder', # 5
-'OP LElbow', # 6
-'OP LWrist', # 7
-'OP MidHip', # 8
-'OP RHip', # 9
-'OP RKnee', # 10
-'OP RAnkle', # 11
-'OP LHip', # 12
-'OP LKnee', # 13
-'OP LAnkle', # 14
-'OP REye', # 15
-'OP LEye', # 16
-'OP REar', # 17
-'OP LEar', # 18
-'OP LBigToe', # 19
-'OP LSmallToe', # 20
-'OP LHeel', # 21
-'OP RBigToe', # 22
-'OP RSmallToe', # 23
-'OP RHeel', # 24
-'''
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-'OP RAnkle', # 11
-'OP RHeel', # 24
-'OP RBigToe', # 22
-'OP RSmallToe', # 23
-
-'OP LAnkle', # 14
-'OP LHeel', # 21
-'OP LBigToe', # 19
-'OP LSmallToe', # 20
-
-'OP RKnee', # 10
-'OP RAnkle', # 11
-'OP RHeel', # 24
-'OP RBigToe', # 22
-
-'OP LKnee', # 13
-'OP LAnkle', # 14
-'OP LHeel', # 21
-'OP LBigToe', # 19
-
-
-
-
-
-
-# SMPL expected joint ordering as provided
-JOINT_NAMES = [
-    # 25 OpenPose joints (in the order provided by OpenPose)
-    'OP Nose', # 0
-    'OP Neck', # 1
-    'OP RShoulder', # 2
-    'OP RElbow', # 3
-    'OP RWrist', # 4
-    'OP LShoulder', # 5
-    'OP LElbow', # 6
-    'OP LWrist', # 7
-    'OP MidHip', # 8
-    'OP RHip', # 9
-    'OP RKnee', # 10
-    'OP RAnkle', # 11
-    'OP LHip', # 12
-    'OP LKnee', # 13
-    'OP LAnkle', # 14
-    'OP REye', # 15
-    'OP LEye', # 16
-    'OP REar', # 17
-    'OP LEar', # 18
-    'OP LBigToe', # 19
-    'OP LSmallToe', # 20
-    'OP LHeel', # 21
-    'OP RBigToe', # 22
-    'OP RSmallToe', # 23
-    'OP RHeel', # 24
-    # 24 Ground Truth joints (superset of joints from different datasets)
-    'Right Ankle',
-    'Right Knee',
-    'Right Hip',
-    'Left Hip',
-    'Left Knee',
-    'Left Ankle',
-    'Right Wrist',
-    'Right Elbow',
-    'Right Shoulder',
-    'Left Shoulder',
-    'Left Elbow',
-    'Left Wrist',
-    'Neck (LSP)',
-    'Top of Head (LSP)',
-    'Pelvis (MPII)',
-    'Thorax (MPII)',
-    'Spine (H36M)',
-    'Jaw (H36M)',
-    'Head (H36M)',
-    'Nose',
-    'Left Eye',
-    'Right Eye',
-    'Left Ear',
-    'Right Ear'
-]
-
-
-'''
-
-
-GROUPS:
-
-
-'OP Nose', # 0
-'OP Neck', # 1
-'OP RShoulder', # 2
-'OP RElbow', # 3
-'OP RWrist', # 4
-'OP LShoulder', # 5
-'OP LElbow', # 6
-'OP LWrist', # 7
-'OP MidHip', # 8
-'OP RHip', # 9
-'OP RKnee', # 10
-'OP RAnkle', # 11
-'OP LHip', # 12
-'OP LKnee', # 13
-'OP LAnkle', # 14
-'OP REye', # 15
-'OP LEye', # 16
-'OP REar', # 17
-'OP LEar', # 18
-'OP LBigToe', # 19
-'OP LSmallToe', # 20
-'OP LHeel', # 21
-'OP RBigToe', # 22
-'OP RSmallToe', # 23
-'OP RHeel', # 24
-'''
-
-'''
-'OP Nose', # 0
-'OP Neck', # 1
-'OP RShoulder', # 2
-'OP RElbow', # 3
-'OP RWrist', # 4
-'OP LShoulder', # 5
-'OP LElbow', # 6
-'OP LWrist', # 7
-'OP MidHip', # 8
-'OP RHip', # 9
-
-
-'OP LHip', # 12
-
-'OP REye', # 15
-'OP LEye', # 16
-'OP REar', # 17
-'OP LEar', # 18
-
-
-'''
-
-
-# Kinect joint ordering (indices) and their names are defined as:
-#   0: PELVIS
-#   1: SPINE_NAVEL
-#   2: SPINE_CHEST
-#   3: NECK
-#   4: CLAVICLE_LEFT
-#   5: SHOULDER_LEFT
-#   6: ELBOW_LEFT
-#   7: WRIST_LEFT
-#   8: HAND_LEFT
-#   9: HANDTIP_LEFT
-#   10: THUMB_LEFT
-#   11: CLAVICLE_RIGHT
-#   12: SHOULDER_RIGHT
-#   13: ELBOW_RIGHT
-#   14: WRIST_RIGHT
-#   15: HAND_RIGHT
-#   16: HANDTIP_RIGHT
-#   17: THUMB_RIGHT
-#   18: HIP_LEFT
-#   19: KNEE_LEFT
-#   20: ANKLE_LEFT
-#   21: FOOT_LEFT
-#   22: HIP_RIGHT
-#   23: KNEE_RIGHT
-#   24: ANKLE_RIGHT
-#   25: FOOT_RIGHT
-#   26: HEAD
-#   27: NOSE
-#   28: EYE_LEFT
-#   29: EAR_LEFT
-#   30: EYE_RIGHT
-#   31: EAR_RIGHT
-
-# Create a mapping dictionary from the SMPL joint names to the Kinect indices.
-# For joints not directly available (or needing a combination), we provide special instructions.
-joint_mapping = {
-    # OpenPose joints
-    'OP Nose': 27,
-    'OP Neck': 3,
-    'OP RShoulder': 12,
-    'OP RElbow': 13,
-    'OP RWrist': 14,
-    'OP LShoulder': 5,
-    'OP LElbow': 6,
-    'OP LWrist': 7,
-    # For OP MidHip, use the average of the left and right hips (indices 18 and 22)
-    'OP MidHip': 0,
-    'OP RHip': 22,
-    'OP RKnee': 23,
-    'OP RAnkle': 24,
-    'OP LHip': 18,
-    'OP LKnee': 19,
-    'OP LAnkle': 20,
-    'OP REye': 30,   # Kinect's EYE_RIGHT
-    'OP LEye': 28,   # Kinect's EYE_LEFT
-    'OP REar': 31,   # Kinect's EAR_RIGHT
-    'OP LEar': 29,   # Kinect's EAR_LEFT
-    # The following joints are not provided by Kinect.
-    'OP LBigToe': 21,
-    'OP LSmallToe': None,
-    'OP LHeel': None,
-    'OP RBigToe': 25,
-    'OP RSmallToe': None,
-    'OP RHeel': None,
-    # Ground Truth joints
-    'Right Ankle': 24,
-    'Right Knee': 23,
-    'Right Hip': 22,
-    'Left Hip': 18,
-    'Left Knee': 19,
-    'Left Ankle': 20,
-    'Right Wrist': 14,
-    'Right Elbow': 13,
-    'Right Shoulder': 12,
-    'Left Shoulder': 5,
-    'Left Elbow': 6,
-    'Left Wrist': 7,
-    'Neck (LSP)': 3,
-    'Top of Head (LSP)': 26,
-    'Pelvis (MPII)': 0,
-    'Thorax (MPII)': 2,  # Using SPINE_CHEST
-    'Spine (H36M)': 1,   # Using SPINE_NAVEL
-    'Jaw (H36M)': None,  # Not provided by Kinect
-    'Head (H36M)': 26,
-    'Nose': 27,
-    'Left Eye': 28,
-    'Right Eye': 30,
-    'Left Ear': 29,
-    'Right Ear': 31
-}
-
-
