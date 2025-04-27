@@ -62,9 +62,9 @@ class demo:
         colors = self._default_colors.copy()
         point, face = self._vsv.face_solver(center, front)
         if (point is not None):
-            v0 = np.linalg.norm(self._vsv._mesh.vertices[face[0], :] - point)
-            v1 = np.linalg.norm(self._vsv._mesh.vertices[face[1], :] - point)
-            v2 = np.linalg.norm(self._vsv._mesh.vertices[face[2], :] - point)
+            v0 = np.linalg.norm(self._vsv._mesh.vertices[face[0], :].reshape((3, -1)) - point)
+            v1 = np.linalg.norm(self._vsv._mesh.vertices[face[1], :].reshape((3, -1)) - point)
+            v2 = np.linalg.norm(self._vsv._mesh.vertices[face[2], :].reshape((3, -1)) - point)
             idx = np.argmin((v0, v1, v2))
 
             radius = 0.05
@@ -80,7 +80,7 @@ class demo:
             self._node_arrow = None
 
         if (point is not None):
-            arrow = self.create_arrow((point + front*0.13).reshape((-1,)), (point + front * 0.03).reshape((-1,)), 0.005, 0.015)
+            arrow = self.create_arrow((point + front*0.13).reshape((-1,)), (point + front*0.03).reshape((-1,)), 0.005, 0.015)
             if (arrow is not None):
                 mat   = pyrender.MetallicRoughnessMaterial(baseColorFactor=(1, 0, 0, 1))
                 self._node_arrow  = self._vsv._scene.add(pyrender.Mesh.from_trimesh(arrow, material=mat, smooth=False))
