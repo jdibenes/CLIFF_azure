@@ -60,18 +60,16 @@ class demo:
         front = rotation @ front 
 
         colors = self._default_colors.copy()
-        point, face = self._vsv.face_solver(center, front)
+        point, face_index, vertex_index = self._vsv.face_solver(center, front)
         if (point is not None):
-            v0 = np.linalg.norm(self._vsv._mesh.vertices[face[0], :].reshape((3, -1)) - point)
-            v1 = np.linalg.norm(self._vsv._mesh.vertices[face[1], :].reshape((3, -1)) - point)
-            v2 = np.linalg.norm(self._vsv._mesh.vertices[face[2], :].reshape((3, -1)) - point)
-            idx = np.argmin((v0, v1, v2))
-
             radius = 0.05
-            distances = self._vsv.surface_solver(face[idx], radius)
+            #distances = self._vsv.surface_solver(face[idx], radius, np.Inf)
+            #distances = self._vsv.surface_solver(face[idx], np.Inf, 2)
+            distances = self._vsv.surface_solver(vertex_index, radius, np.Inf)
+            #filtered_indices = distances.keys()
             filtered_indices = self._vsv.disk_solver(distances.keys())
             for vertex_index in filtered_indices:
-                colors[vertex_index, :] = self._colormap[int(255*(distances[vertex_index] / radius)), 0, :]
+                colors[vertex_index, :] = self._colormap[min([int(255*(distances[vertex_index] / radius)),255]), 0, :]
         self._vsv.set_mesh_colors(colors)
         self._vsv.reload_mesh()
 
