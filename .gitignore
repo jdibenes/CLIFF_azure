@@ -1,0 +1,8 @@
+/dataset
+/__pycache__
+/common/__pycache__
+/data/ckpt
+/models/backbones/hrnet/__pycache__
+/models/backbones/hrnet/hrnet_config/__pycache__
+/models/backbones/hrnet/__pycache__
+/models/cliff_hr48/__pycache__
