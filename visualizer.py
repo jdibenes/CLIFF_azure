@@ -102,7 +102,7 @@ class vsv:
 
         p[:3, 3:4] = (center + wz * z)
 
-        print(f'target solution determinant={np.linalg.det(p)}')
+        print(f'focus_solver determinant={np.linalg.det(p)}')
 
         return [p, center, wz]
     
@@ -119,7 +119,7 @@ class vsv:
 
         return point, face_index, vertex_indices[snap_index]
     
-    def surface_solver(self, origin_vertex_index, radius, level):
+    def select_vertices(self, origin_vertex_index, radius, level):
         vertices  = self._mesh.vertices.view(np.ndarray)
         neighbors = self._mesh.vertex_neighbors
         buffer    = collections.deque()
@@ -141,34 +141,26 @@ class vsv:
         
         return distances
     
-    def disk_solver(self, vertex_indices):
+    def select_complete_faces(self, vertex_indices):
         vertex_faces = self._mesh.vertex_faces
-        face_indices_selected = set()
-        for vertex_index in vertex_indices:
-            for face_index in vertex_faces[vertex_index, :]:
-                if (face_index < 0):
-                    break
-                face_indices_selected.add(face_index)
         faces = self._mesh.faces.view(np.ndarray)
         face_indices_complete = set()
-        for face_index in face_indices_selected:
-            face_vertices = faces[face_index]
-            keep = True
-            for face_vertex in face_vertices:
-                if (face_vertex not in vertex_indices):
-                    keep = False
-                    break
-            if (keep):
-                face_indices_complete.add(face_index)
-        vertex_indices_keep = []
+        vertex_indices_complete = set()
+        vertex_indices_seen = set()
+
         for vertex_index in vertex_indices:
+            if (vertex_index in vertex_indices_seen):
+                continue
             for face_index in vertex_faces[vertex_index, :]:
-                if (face_index < 0):
-                    break
-                if (face_index in face_indices_complete):
-                    vertex_indices_keep.append(vertex_index)
-                    break
-        return vertex_indices_keep
+                if (face_index >= 0):
+                    face_vertices = faces[face_index].tolist()
+                    vertex_indices_seen.update(face_vertices)
+                    keep = all([face_vertex in vertex_indices for face_vertex in face_vertices])
+                    if (keep):
+                        face_indices_complete.add(face_index)
+                        vertex_indices_complete.update(face_vertices)
+        
+        return list(face_indices_complete), list(vertex_indices_complete)
 
     def focus_foot(self, bigtoe, smalltoe, ankle, heel):
         left  = self.cross(ankle - heel, bigtoe - ankle)
