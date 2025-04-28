@@ -108,26 +108,35 @@ class vsv:
     
     def face_solver(self, origin, direction):
         point, rid, tid = self._mesh.ray.intersects_location(origin.T, direction.T, multiple_hits=False)
-        face = self._mesh.faces[tid]
-        return (point.T, face[0]) if (len(rid) > 0) else (None, None)
+        if (len(rid) <= 0):
+            return (None, None, None)
+        point = point.T
+        face_index = tid[0]
+        vertex_indices = self._mesh.faces.view(np.ndarray)[face_index].tolist()
+        vertices = self._mesh.vertices.view(np.ndarray)[vertex_indices, :].T
+        distances = np.linalg.norm(point - vertices, axis=0)
+        snap_index = np.argmin(distances)
+
+        return point, face_index, vertex_indices[snap_index]
     
-    def surface_solver(self, origin_vertex_index, radius):
-        vertices  = self._mesh.vertices
-        graph     = self._mesh.vertex_adjacency_graph
+    def surface_solver(self, origin_vertex_index, radius, level):
+        vertices  = self._mesh.vertices.view(np.ndarray)
+        neighbors = self._mesh.vertex_neighbors
         buffer    = collections.deque()
         distances = {origin_vertex_index : 0}
 
-        buffer.append((origin_vertex_index, 0))
+        buffer.append((origin_vertex_index, 0, 0))
 
         while (len(buffer) > 0):
-            vertex_index, vertex_distance = buffer.popleft()
+            vertex_index, vertex_distance, vertex_level = buffer.popleft()
             vertex_xyz = vertices[vertex_index, :]
 
-            for neighbor_index in graph.neighbors(vertex_index):
+            for neighbor_index in neighbors[vertex_index]:
                 neighbor_xyz = vertices[neighbor_index, :]
                 neighbor_distance = vertex_distance + np.linalg.norm(neighbor_xyz - vertex_xyz)
-                if ((neighbor_distance < radius) and (neighbor_distance < distances.get(neighbor_index, np.Inf))):          
-                    buffer.append((neighbor_index, neighbor_distance))
+                neighbor_level = vertex_level + 1
+                if ((neighbor_distance <= radius) and (neighbor_level <= level) and (neighbor_distance < distances.get(neighbor_index, np.Inf))):          
+                    buffer.append((neighbor_index, neighbor_distance, neighbor_level))
                     distances[neighbor_index] = neighbor_distance
         
         return distances
@@ -140,7 +149,7 @@ class vsv:
                 if (face_index < 0):
                     break
                 face_indices_selected.add(face_index)
-        faces = self._mesh.faces
+        faces = self._mesh.faces.view(np.ndarray)
         face_indices_complete = set()
         for face_index in face_indices_selected:
             face_vertices = faces[face_index]
@@ -319,6 +328,7 @@ class vsv:
         shoulder = self.get_joint(2)
 
         return self.focus_upper_arm(wrist, elbow, shoulder)
+    
 
 
 
