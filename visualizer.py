@@ -1,41 +1,118 @@
 
 import numpy as np
+import pyrealsense2 as rs
 import pyrender
 import trimesh
+import cv2
 import collections
 
+from pyglet import clock
 
-class vsv:
-    def __init__(self, camera_vertical_fov, viewport_width, viewport_height):
-        self._renderer = pyrender.OffscreenRenderer(viewport_width, viewport_height)
-        self._scene    = pyrender.Scene()
-        self._camera   = pyrender.PerspectiveCamera(yfov=camera_vertical_fov)
-        self._light    = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
 
+class camera_opencv:
+    def open(self, id=0, resolution=(640, 480), framerate=30):
+        self._cap = cv2.VideoCapture(id)
+
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  resolution[0])
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
+        self._cap.set(cv2.CAP_PROP_FPS,          framerate)
+
+    def read(self):
+        return { 'color' : self._cap.read()[1] }
+
+    def close(self):
+        self._cap.release()
+
+
+class camera_realsense:
+    def open(self, resolution=(640, 480), framerate=30):
+        self._pipe   = rs.pipeline()
+        self._config = rs.config()
+
+        self._config.enable_stream(rs.stream.depth, resolution[0], resolution[1], rs.format.z16,  framerate)
+        self._config.enable_stream(rs.stream.color, resolution[0], resolution[1], rs.format.bgr8, framerate)
+        
+        self._pipe.start(self._config)
+
+    def read(self):
+        frames = self._pipe.wait_for_frames()
+
+        depth_frame = frames.get_depth_frame()
+        color_frame = frames.get_color_frame()
+
+        depth_image = np.asanyarray(depth_frame.get_data())
+        color_image = np.asanyarray(color_frame.get_data())
+
+        return { 'color' : color_image, 'depth' : depth_image }
+    
+    def close(self):
+        self._pipe.stop()
+
+
+class viewer(pyrender.Viewer):
+    @staticmethod
+    def _time_event(dt, self):
+        if self._is_active:
+            self.on_begin_time_event()
+        pyrender.Viewer._time_event(dt, self)
+        if self._is_active:
+            self.on_end_time_event()
+
+    def switch_to(self):
+        if (not self.__time_event_ff):
+            clock.unschedule(pyrender.Viewer._time_event)
+            clock.schedule_interval(viewer._time_event, 1.0 / self.viewer_flags['refresh_rate'], self)
+            self.__time_event_ff = True
+        super().switch_to()
+
+    def __init__(self, *args, **kwargs):
+        self.__time_event_ff = False
+        super().__init__(*args, **kwargs)
+
+    def set_camera_target(self, pose, axis, center):
+        self._trackball._n_pose = pose
+        self._trackball._n_target = center.reshape((-1,))
+        self.viewer_flags['rotate_axis'] = axis.reshape((-1,))
+        self.viewer_flags['view_center'] = center.reshape((-1,))
+
+    def _invoke(self, tup):
+        if (tup):
+            callback = None
+            args = []
+            kwargs = {}
+            if not isinstance(tup, (list, tuple, np.ndarray)):
+                callback = tup
+            else:
+                callback = tup[0]
+                if len(tup) == 2:
+                    args = tup[1]
+                if len(tup) == 3:
+                    kwargs = tup[2]
+            callback(self, *args, **kwargs)
+        
+    def on_begin_time_event(self):
+        self._invoke(self.viewer_flags.get('vsv.hook_on_begin'))
+        
+    def on_end_time_event(self):
+        self._invoke(self.viewer_flags.get('vsv.hook_on_end'))
+
+
+class scene_manager:
+    def __init__(self, camera_yfov):
+        self._scene  = pyrender.Scene()
+        self._camera = pyrender.PerspectiveCamera(yfov=camera_yfov)
+        self._light  = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
+        
         self._camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]], dtype=np.float32).reshape((4, 4))
-        self._camera_fy   = viewport_height / (2 * np.tan(0.5 * camera_vertical_fov))
-        self._camera_fx   = self._camera_fy
-        self._camera_cy   = viewport_height / 2
-        self._camera_cx   = viewport_width / 2
-        self._camera_yfov = camera_vertical_fov
-        self._camera_xfov = 2*np.arctan(viewport_width / (2*self._camera_fx))
         
         self._node_camera = self._scene.add(self._camera, pose=self._camera_pose)
-        self._node_light  = self._scene.add(self._light, pose=self._camera_pose)
+        self._node_light  = self._scene.add(self._light,  pose=self._camera_pose)
         self._node_mesh   = None
+        self._node_groups = {}
 
-    def set_smpl_mesh(self, vertices, faces, joints, segmentation):
-        if (self._node_mesh is not None):
-            self._scene.remove_node(self._node_mesh)
-            self._node_mesh = None
-
-        self._mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-        self._mesh_centroid = self._mesh.bounding_box.centroid.copy().reshape((1, 3))
-        self._mesh.vertices -= self._mesh_centroid
-        self._joints = (joints - self._mesh_centroid).T
-        self._segmentation = segmentation
-
-        self._node_mesh = self._scene.add(pyrender.Mesh.from_trimesh(self._mesh))
+    def set_smpl_mesh(self, mesh):
+        self._mesh = mesh
+        self.reload_mesh()
 
     def get_mesh_colors(self):
         return self._mesh.visual.vertex_colors
@@ -44,15 +121,11 @@ class vsv:
         self._mesh.visual.vertex_colors = colors
 
     def reload_mesh(self):
-        self._scene.remove_node(self._node_mesh)
+        if (self._node_mesh is not None):
+            self._scene.remove_node(self._node_mesh)
+            self._node_mesh = None
         self._node_mesh = self._scene.add(pyrender.Mesh.from_trimesh(self._mesh))
 
-    def render(self):
-        self._color, self._depth = self._renderer.render(self._scene)
-        self._color = self._color.copy()
-
-        return (self._color, self._depth)
-    
     def get_camera_pose(self):
         return self._camera_pose
     
@@ -60,21 +133,33 @@ class vsv:
         self._camera_pose = camera_pose
 
         self._scene.set_pose(self._node_camera, self._camera_pose)
-        self._scene.set_pose(self._node_light, self._camera_pose)
+        self._scene.set_pose(self._node_light,  self._camera_pose)
 
-    def project_points(self, points):
-        r = self._camera_pose[:3, :3]
-        t = self._camera_pose[:3, 3:4]
+    def clear_group(self, group):
+        nodes = self._node_groups.get(group, [])
+        for node in nodes:
+            self._scene.remove_node(node)
+        self._node_groups[group] = []
 
-        camera_points     = r.T @ points - r.T @ t
-        normalized_points = camera_points[0:2, :] / -camera_points[2, :]
+    def add(self, group, object):
+        nodes = self._node_groups.get(group, [])
+        nodes.append(self._scene.add(object))
+        self._node_groups[group] = nodes
 
-        image_x =  normalized_points[0, :] * self._camera_fx + self._camera_cx
-        image_y = -normalized_points[1, :] * self._camera_fy + self._camera_cy
 
-        return np.vstack((image_x, image_y))
+class solver:
+    def __init__(self, camera_yfov, viewport_width, viewport_height):
+        self._camera_fy   = viewport_height / (2 * np.tan(0.5 * camera_yfov))
+        self._camera_fx   = self._camera_fy
+        self._camera_cy   = viewport_height / 2
+        self._camera_cx   = viewport_width / 2
+        self._camera_yfov = camera_yfov
+        self._camera_xfov = 2 * np.arctan(viewport_width / (2 * self._camera_fx))
 
-    # 
+    def set_smpl_mesh(self, mesh, joints, segmentation):
+        self._mesh = mesh
+        self._joints = joints
+        self._segmentation = segmentation
 
     def get_joint(self, index):
         return self._joints[:, index].reshape((3, -1))
@@ -102,9 +187,7 @@ class vsv:
 
         p[:3, 3:4] = (center + wz * z)
 
-        print(f'focus_solver determinant={np.linalg.det(p)}')
-
-        return [p, center, wz]
+        return p, center, wz
     
     def face_solver(self, origin, direction):
         point, rid, tid = self._mesh.ray.intersects_location(origin.T, direction.T, multiple_hits=False)
@@ -161,6 +244,8 @@ class vsv:
                         vertex_indices_complete.update(face_vertices)
         
         return list(face_indices_complete), list(vertex_indices_complete)
+    
+    # Single -------------------------------------------------------------------
 
     def focus_foot(self, bigtoe, smalltoe, ankle, heel):
         left  = self.cross(ankle - heel, bigtoe - ankle)
@@ -321,18 +406,23 @@ class vsv:
 
         return self.focus_upper_arm(wrist, elbow, shoulder)
     
+    # Composite ----------------------------------------------------------------
 
+    def focus_whole(self, lhip, mhip, rhip, neck, lear, rear, rsmalltoe, lsmalltoe):
+        left  = lhip - rhip
+        front = self.cross(left, neck - mhip)
+        up    = self.cross(front, left)
 
+        up    = self.normalize(up)
+        left  = self.normalize(left)
+        front = self.normalize(front)
 
-
-
-
-    def focus_leg(self, index_ankle, index_knee, index_hip, index_bigtoe, margin):
-        ankle  = self.get_joint(index_ankle)
-        knee   = self.get_joint(index_knee)
-        hip    = self.get_joint(index_hip)
-        bigtoe = self.get_joint(index_bigtoe)
-
+        center = mhip
+        points = np.hstack((lhip, mhip, rhip, neck, lear, rear, rsmalltoe, lsmalltoe))
+                
+        return self.focus_solver(left, up, front, center, points)
+        
+    def focus_leg(self, ankle, knee, hip, bigtoe):
         up_thigh        = hip - knee
         up_lower_leg    = knee - ankle
         left            = self.cross(up_thigh, up_lower_leg)
@@ -347,13 +437,81 @@ class vsv:
         center = knee
         points = np.hstack((ankle, knee, hip, bigtoe))
 
-        return self.focus_solver(left, up, front, center, points, margin)
+        return self.focus_solver(left, up, front, center, points)
     
-    def focus_right_leg(self, margin=1.0):
-        return self.focus_leg(11, 10, 9, 22, margin)
+    def focus_right_leg(self):
+        ankle  = self.get_joint(11)
+        knee   = self.get_joint(10)
+        hip    = self.get_joint(9)
+        bigtoe = self.get_joint(22)
 
-    def focus_left_leg(self, margin=1.0):
-        return self.focus_leg(14, 13, 12, 19, margin)
+        return self.focus_leg(ankle, knee, hip, bigtoe)
+
+    def focus_left_leg(self):
+        ankle  = self.get_joint(14)
+        knee   = self.get_joint(13)
+        hip    = self.get_joint(12)
+        bigtoe = self.get_joint(19)
+
+        return self.focus_leg(ankle, knee, hip, bigtoe)
+    
+    def focus_center_whole(self):
+        lhip      = self.get_joint(12)
+        mhip      = self.get_joint(8)
+        rhip      = self.get_joint(9)
+        neck      = self.get_joint(1)
+        lear      = self.get_joint(18)
+        rear      = self.get_joint(17)
+        rsmalltoe = self.get_joint(23)
+        lsmalltoe = self.get_joint(20)
+
+        return self.focus_whole(lhip, mhip, rhip, neck, lear, rear, rsmalltoe, lsmalltoe)
+
+
+
+        
+        
+        
+        
+
+
+
+
+
+
+
+
+
+    
+    
+
+
+
+    '''
+    def render(self):
+        self._color, self._depth = self._renderer.render(self._scene)
+        self._color = self._color.copy()
+
+        return (self._color, self._depth)
+    '''
+    #self._renderer = pyrender.OffscreenRenderer(viewport_width, viewport_height)
+    '''
+    def project_points(self, points):
+        r = self._camera_pose[:3, :3]
+        t = self._camera_pose[:3, 3:4]
+
+        camera_points     = r.T @ points - r.T @ t
+        normalized_points = camera_points[0:2, :] / -camera_points[2, :]
+
+        image_x =  normalized_points[0, :] * self._camera_fx + self._camera_cx
+        image_y = -normalized_points[1, :] * self._camera_fy + self._camera_cy
+
+        return np.vstack((image_x, image_y))
+    '''
+    # 
+
+    
+    
     
     
 
@@ -371,7 +529,7 @@ class vsv:
 
 
         
-
+  
 
 
     '''
