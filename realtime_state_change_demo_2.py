@@ -208,20 +208,20 @@ class demo:
         full_img_shape = torch.stack((torch.tensor([img_h], device=device, dtype=torch.float32), torch.tensor([img_w], device=device, dtype=torch.float32)), dim=-1)
 
         # Load texture
-        #texture_image = Image.open("./data/smpl_uv_20200910.png")
-        #with open('./data/smpl_uv.obj', 'r') as obj_file:
-        #    obj_mesh = trimesh.exchange.obj.load_obj(obj_file, maintain_order=True)
-        #mesh_geometry = obj_mesh['geometry']['./data/smpl_uv.obj']
-        #vertices = mesh_geometry['vertices']
-        #faces = mesh_geometry['faces']
-        #visuals = mesh_geometry['visual']
-        #print(vertices.shape)
-        #print(faces.shape)
-        #print(visuals.uv.shape)
-        #trimesh.visual.texture.unmerge_faces
-
-        #mesh_visuals = visuals#trimesh.visual.TextureVisuals(uv=visuals.uv[-6890:, :], image=texture_image)
-        #print(obj_mesh)
+        texture_image = Image.open("./data/smpl_uv_20200910.png")
+        with open('./data/smpl_uv.obj', 'r') as obj_file:
+            obj_mesh_a = trimesh.exchange.obj.load_obj(obj_file, maintain_order=True)
+        with open('./data/smpl_uv.obj', 'r') as obj_file:
+            obj_mesh_b = trimesh.exchange.obj.load_obj(obj_file)
+        mesh_vertices_b = obj_mesh_b['geometry']['./data/smpl_uv.obj']['vertices']
+        mesh_faces_a = obj_mesh_a['geometry']['./data/smpl_uv.obj']['faces']
+        mesh_faces_b = obj_mesh_b['geometry']['./data/smpl_uv.obj']['faces']
+        mesh_visuals_b = obj_mesh_b['geometry']['./data/smpl_uv.obj']['visual']
+        uv_transform = np.zeros(mesh_vertices_b.shape[0], dtype=np.int64)
+        for face_index in range(0, mesh_faces_b.shape[0]):
+            for vertex_index in range(0, 3):
+                uv_transform[mesh_faces_b[face_index, vertex_index]] = mesh_faces_a[face_index, vertex_index]
+        mesh_visuals = trimesh.visual.TextureVisuals(uv=mesh_visuals_b.uv, image=texture_image)        
         
         # Initialize visualization utilities
         joint_solver  = visualizer.solver(camera_yfov, viewport_width, viewport_height)
@@ -239,7 +239,9 @@ class demo:
             2 : joint_solver.focus_right_lower_leg,
             3 : joint_solver.focus_left_lower_leg,
         }
-        #self._mesh_visuals = mesh_visuals
+        self._mesh_visuals = mesh_visuals
+        self._uv_transform = uv_transform
+        self._mesh_faces_b = mesh_faces_b
 
         # Start with state 1 and focus full body.
         self._current_state = 1
@@ -328,7 +330,12 @@ class demo:
         joints = align_pose[:3, :3] @ joints + align_pose[:3, 3:4]
 
         self._joint_solver.set_smpl_mesh(mesh, joints, None)
-        self._scene_control.set_smpl_mesh(mesh)
+
+        vertices_b = mesh.vertices[self._uv_transform, :]
+        faces_b = self._mesh_faces_b
+        mesh2 = trimesh.Trimesh(vertices=vertices_b, faces=faces_b, visual=self._mesh_visuals, process=False)
+        
+        self._scene_control.set_smpl_mesh(mesh2)
 
         camera_pose, focus_center, axis_displacement = self._regions[self._current_region]()
         focus_axis = camera_pose[:3, 1]
@@ -371,6 +378,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
