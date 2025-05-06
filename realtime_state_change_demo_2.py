@@ -193,11 +193,18 @@ class demo:
         smpl = SMPL(constants.SMPL_MODEL_DIR, batch_size=1).to(device)
 
         # Set up the webcam and offscreen pyrender renderer.
-        cap = visualizer.camera_opencv()
+        cap = visualizer.camera_realsense()
         cap.open()
 
         # Model stuff
-        frame = cap.read()['color']
+        frame_data = cap.read()
+        if ('depth_intrinsics' in frame_data):
+            print(f"depth_intrinsics={frame_data['depth_intrinsics']}")
+            print(f"depth_scale={frame_data['depth_scale']}")
+        if ('color_intrinsics' in frame_data):
+            print(f"color_intrinsics={frame_data['color_intrinsics']}")
+
+        frame = frame_data['color']
         img_h, img_w = frame.shape[:2]
         center = torch.tensor([[img_w / 2.0, img_h / 2.0]], device=device, dtype=torch.float32)
         scale = torch.tensor([1.0], device=device, dtype=torch.float32)
@@ -291,8 +298,13 @@ class demo:
         self._next_region = target
 
     def animate(self, viewer):
-        frame = self._cap.read()['color']
+        frame_data = self._cap.read()
+        frame = frame_data['color']
+        if ('depth' in frame_data):
+            depth = frame_data['depth']
+            cv2.imshow('Depth', cv2.applyColorMap((((depth * frame_data['depth_scale']) / 7.5) * 255).astype(np.uint8), cv2.COLORMAP_INFERNO))
         cv2.imshow('Video', frame)
+        cv2.waitKey(1)
 
         norm_img = preprocess_frame(frame, target_size=(224, 224)).to(self._device)
 
@@ -365,8 +377,8 @@ class demo:
 
         if (update_region):
             viewer.set_camera_target(camera_pose, focus_axis, focus_center)
-            print(vertices.shape)
-            print(faces.shape)
+            #print(vertices.shape)
+            #print(faces.shape)
 
 def main():
     parser = argparse.ArgumentParser()
