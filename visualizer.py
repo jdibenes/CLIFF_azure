@@ -32,10 +32,17 @@ class camera_realsense:
         self._config.enable_stream(rs.stream.depth, resolution[0], resolution[1], rs.format.z16,  framerate)
         self._config.enable_stream(rs.stream.color, resolution[0], resolution[1], rs.format.bgr8, framerate)
         
-        self._pipe.start(self._config)
+        self._profile = self._pipe.start(self._config)
+
+        self._scale_depth = self._profile.get_device().first_depth_sensor().get_depth_scale()
+
+        self._intrinsics_color = self._profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
+        self._intrinsics_depth = self._profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
+
+        self._align = rs.align(rs.stream.color)
 
     def read(self):
-        frames = self._pipe.wait_for_frames()
+        frames = self._align.process(self._pipe.wait_for_frames())
 
         depth_frame = frames.get_depth_frame()
         color_frame = frames.get_color_frame()
@@ -43,7 +50,7 @@ class camera_realsense:
         depth_image = np.asanyarray(depth_frame.get_data())
         color_image = np.asanyarray(color_frame.get_data())
 
-        return { 'color' : color_image, 'depth' : depth_image }
+        return { 'color' : color_image, 'color_intrinsics' : self._intrinsics_color, 'depth' : depth_image, 'depth_intrinsics' : self._intrinsics_depth, 'depth_scale' : self._scale_depth }
     
     def close(self):
         self._pipe.stop()
