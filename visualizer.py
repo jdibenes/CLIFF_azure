@@ -40,18 +40,20 @@ class camera_realsense:
         self._intrinsics_depth = self._profile.get_stream(rs.stream.depth).as_video_stream_profile().get_intrinsics()
 
         self._align = rs.align(rs.stream.color)
+        self._pc = rs.pointcloud()
 
-    def read(self):
+    def read(self, with_point_cloud=False):
         frames = self._align.process(self._pipe.wait_for_frames())
 
         depth_frame = frames.get_depth_frame()
         color_frame = frames.get_color_frame()
 
+        pointcloud  = np.asanyarray(self._pc.calculate(depth_frame).get_vertices()).view(np.float32).reshape(-1, 3) if (with_point_cloud) else None
         depth_image = np.asanyarray(depth_frame.get_data())
         color_image = np.asanyarray(color_frame.get_data())
 
-        return { 'color' : color_image, 'color_intrinsics' : self._intrinsics_color, 'depth' : depth_image, 'depth_intrinsics' : self._intrinsics_depth, 'depth_scale' : self._scale_depth }
-    
+        return { 'color' : color_image, 'color_intrinsics' : self._intrinsics_color, 'depth' : depth_image, 'depth_intrinsics' : self._intrinsics_depth, 'depth_scale' : self._scale_depth, 'pointcloud' : pointcloud }
+
     def close(self):
         self._pipe.stop()
 
