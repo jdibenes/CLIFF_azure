@@ -299,8 +299,12 @@ class demo:
 
         print("Starting real-time inference.")
         print("Press 'q' to exit.")
-        print("Press 1/2/3/4 to change state.")
-        print("Press 7/8/9 to focus full body / right leg / left leg.")
+        print("Press 1 to change state.")
+        print("Press 2/3 to move pointer.")
+        print("Press 4/5 to rotate pointer.")
+        print("Press 6/7 to adjust pointer size.")
+        print("Press 8 to cycle through full body / right leg / left leg.")
+        print("Press 9 to cycle between vertex colors / texture.")
 
         visualizer.viewer(self._scene_control._scene,
                     viewport_size=(viewport_width, viewport_height),
@@ -424,6 +428,12 @@ class demo:
 
         self._scene_control.set_smpl_mesh(mesh2)
         self._scene_control.clear_group('arrows')
+
+        if (point is not None):
+            arrow = create_arrow((point + front*0.13).reshape((-1,)), (point + front*0.03).reshape((-1,)), 0.005, 0.015)
+            if (arrow is not None):
+                mat   = pyrender.MetallicRoughnessMaterial(baseColorFactor=(1, 0, 0, 1))
+                self._scene_control.add('arrows', pyrender.Mesh.from_trimesh(arrow, material=mat, smooth=False))
 
         if self._current_state in STATE_CONFIG:
             targets = STATE_CONFIG[self._current_state]['targets'](joints.T)
