@@ -144,25 +144,25 @@ def create_arrow(start, end, shaft_radius=0.005, head_radius=0.01, head_length=0
 
 # Define state configurations.
 STATE_CONFIG = {
-    1: {
+    0: {
         'text': "Check knees visually for redness",
         'targets': lambda joints: [joints[JOINT_NAMES.index("OP LKnee")], joints[JOINT_NAMES.index("OP RKnee")]]  # Left and Right knees
     },
-    2: {
+    1: {
         'text': "Check for redness and swelling",
         'targets': lambda joints: [
             (joints[JOINT_NAMES.index("OP LKnee")] + joints[JOINT_NAMES.index("OP LAnkle")]) / 2.0,  # Left calf (midpoint between knee and ankle)
             (joints[JOINT_NAMES.index("OP RKnee")] + joints[JOINT_NAMES.index("OP RAnkle")]) / 2.0   # Right calf (midpoint between knee and ankle)
         ]
     },
-    3: {
+    2: {
         'text': "Check between toes",
         'targets': lambda joints: [
             (joints[JOINT_NAMES.index("OP LSmallToe")] + joints[JOINT_NAMES.index("OP LBigToe")]) / 2.0,  # Left toe (midpoint between big and small toe)
             (joints[JOINT_NAMES.index("OP RSmallToe")] + joints[JOINT_NAMES.index("OP RBigToe")]) / 2.0   # Right toe (midpoint between big and small toe)
         ]
     },
-    4: {
+    3: {
         'text': "Check for swelling",
         'targets': lambda joints: [joints[JOINT_NAMES.index("OP RHeel")], joints[JOINT_NAMES.index("OP LHeel")]]  # Left and Right heels
     }
@@ -175,6 +175,17 @@ class demo:
         # Device selection
         device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         print(f'Using device: {device}')
+
+        # Create colormap
+        self._colormap = cv2.applyColorMap(np.arange(0, 256, 1, dtype=np.uint8), cv2.COLORMAP_AUTUMN)
+        self._colormap = self._colormap[:, :, ::-1]
+        self._colormap = np.dstack((self._colormap, 255 * np.ones(self._colormap.shape[0:2] + (1,), dtype=self._colormap.dtype)))
+
+        self._mesh_colors = np.zeros((6890, 4), dtype=np.uint8)
+        self._mesh_colors[:, 0] = 102
+        self._mesh_colors[:, 1] = 102
+        self._mesh_colors[:, 2] = 102
+        self._mesh_colors[:, 3] = 255
 
         # Parameters
         viewport_width, viewport_height = 1280, 720
@@ -193,7 +204,7 @@ class demo:
         smpl = SMPL(constants.SMPL_MODEL_DIR, batch_size=1).to(device)
 
         # Set up the webcam and offscreen pyrender renderer.
-        cap = visualizer.camera_realsense()
+        cap = visualizer.camera_opencv()
         cap.open()
 
         # Model stuff
@@ -241,19 +252,22 @@ class demo:
         self._bbox_info = bbox_info
         self._joint_solver = joint_solver
         self._scene_control = scene_control
-        self._regions = {
-            1 : joint_solver.focus_center_whole,
-            2 : joint_solver.focus_right_lower_leg,
-            3 : joint_solver.focus_left_lower_leg,
-        }
+        self._regions = [
+            joint_solver.focus_center_whole,
+            joint_solver.focus_right_lower_leg,
+            joint_solver.focus_left_lower_leg,
+        ]
         self._mesh_visuals = mesh_visuals
         self._uv_transform = uv_transform
         self._mesh_faces_b = mesh_faces_b
 
         # Start with state 1 and focus full body.
-        self._current_state = 1
-        self._current_region = 1
-        self._next_region = 1
+        self._current_state = 0
+        self._current_region = 0
+        self._next_region = 0
+        self._pointer_position = [0, 0]
+        self._pointer_size = 0.05
+        self._use_texture = False
 
         caption = [dict(
             text     = STATE_CONFIG[self._current_state]['text'],
@@ -265,14 +279,20 @@ class demo:
             )
         ]
 
+        di = 0.02
+        da = (10/180) * np.pi
+        dr = 0.01
+
         key_handlers = {
-            '1': (self.set_state,  [1]),
-            '2': (self.set_state,  [2]),
-            '3': (self.set_state,  [3]),
-            '4': (self.set_state,  [4]),
-            '7': (self.set_target, [1]),
-            '8': (self.set_target, [2]),
-            '9': (self.set_target, [3])
+            '1': (self.advance_state,  []),
+            '2': (self.traverse, [di, 0]),
+            '3': (self.traverse, [-di, 0]),
+            '4': (self.traverse, [0, da]),
+            '5': (self.traverse, [0, -da]),
+            '6': (self.adjust_pointer, [dr]),
+            '7': (self.adjust_pointer, [-dr]),
+            '8': (self.advance_target, []),
+            '9': (self.toggle_texture, []),
         }
 
         viewer_flags = {'caption' : caption, 'vsv.hook_on_begin' : (self.animate, [])}
@@ -290,12 +310,29 @@ class demo:
 
         cap.close()
 
-    def set_state(self, viewer, state):
-        self._current_state = state
-        viewer.viewer_flags['caption'][0]['text'] = STATE_CONFIG[state]['text']
+    def advance_state(self, viewer):
+        self._current_state = (self._current_state + 1) % len(STATE_CONFIG)
+        viewer.viewer_flags['caption'][0]['text'] = STATE_CONFIG[self._current_state]['text']
 
-    def set_target(self, viewer, target):
-        self._next_region = target
+    def advance_target(self, viewer):
+        self._next_region = (self._current_region + 1) % len(self._regions)
+        self._pointer_position = [0, 0]
+
+    def traverse(self, viewer, delta_displacement, delta_angle):
+        displacement = self._pointer_position[0] + delta_displacement
+        angle = self._pointer_position[1] + delta_angle
+        if (angle > np.pi):
+            angle = angle - (2*np.pi)
+        if (angle < -np.pi):
+            angle = angle + (2*np.pi)
+        self._pointer_position = [displacement, angle]
+
+    def adjust_pointer(self, viewer, delta_radius):
+        radius = max([self._pointer_size + delta_radius, 0])
+        self._pointer_size = radius
+
+    def toggle_texture(self, viewer):
+        self._use_texture = not self._use_texture
 
     def animate(self, viewer):
         frame_data = self._cap.read()
@@ -343,16 +380,49 @@ class demo:
 
         self._joint_solver.set_smpl_mesh(mesh, joints, None)
 
-        vertices_b = mesh.vertices[self._uv_transform, :]
-        faces_b = self._mesh_faces_b
-        mesh2 = trimesh.Trimesh(vertices=vertices_b, faces=faces_b, visual=self._mesh_visuals, process=False)
-        
-        self._scene_control.set_smpl_mesh(mesh2)
-
         camera_pose, focus_center, axis_displacement = self._regions[self._current_region]()
         focus_axis = camera_pose[:3, 1]
         forward = camera_pose[:3, 2:3]
 
+        displacement, angle = self._pointer_position
+
+        pose   = camera_pose
+        center = focus_center
+        up     = pose[:3, 1:2]
+        front  = pose[:3, 2:3]
+
+        rotation = cv2.Rodrigues(up.reshape((-1,)) * angle)[0]
+
+        center = center + up * displacement
+        front  = rotation @ front
+
+        point, face_index, vertex_index = self._joint_solver.face_solver(center, front)
+
+        if (point is not None):
+            distances = self._joint_solver.select_vertices(vertex_index, self._pointer_size, np.Inf)
+            selected_indices = distances.keys()
+            filtered_faces, filtered_indices = self._joint_solver.select_complete_faces(selected_indices)
+            if (len(filtered_indices) > 0):
+                selected_indices = filtered_indices
+        else:
+            distances = None
+            selected_indices = None
+
+        colors = self._mesh_colors.copy()
+        if ((selected_indices is not None) and (distances is not None)):
+            for vertex_index in selected_indices:
+                colors[vertex_index, :] = self._colormap[min([int(255*(distances[vertex_index] / max([self._pointer_size, 0.001]))),255]), 0, :]
+
+        vertices_b = mesh.vertices[self._uv_transform, :]
+        colors_b = colors[self._uv_transform, :]
+        faces_b = self._mesh_faces_b
+
+        if (self._use_texture):
+            mesh2 = trimesh.Trimesh(vertices=vertices_b, faces=faces_b, visual=self._mesh_visuals, process=False)
+        else:
+            mesh2 = trimesh.Trimesh(vertices=vertices_b, faces=faces_b, vertex_colors=colors_b, process=False)
+
+        self._scene_control.set_smpl_mesh(mesh2)
         self._scene_control.clear_group('arrows')
 
         if self._current_state in STATE_CONFIG:
@@ -377,8 +447,6 @@ class demo:
 
         if (update_region):
             viewer.set_camera_target(camera_pose, focus_axis, focus_center)
-            #print(vertices.shape)
-            #print(faces.shape)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -390,163 +458,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-def animate_old(viewer, cap, device, cliff_model, bbox_info, smpl, joint_solver):  
-    return
-
-
-
-
-    
-
-
-    
-    
-
-
-
-
-    #pred_cam_full = cam_crop2full(pred_cam_crop, center, scale, full_img_shape, focal_length)
-    #init_pose = transforms.matrix_to_axis_angle(pred_rotmat).view(-1,72)
-
-    #res = smplify(init_pose.detach(), pred_betas.detach(), pred_cam_full.detach(),
-    #            torch.as_tensor(center).unsqueeze(0).to(device), keypoints)
-    #_, opt_j, opt_pose, opt_b, opt_cam_t, _ = res
-
-
-
-
-
-    #print(pred_output.betas)
-    #print(pred_betas)
-    
-    
-    
-    #img_h, img_w = frame.shape[:2]
-    '''
-    pred_cam_full = cam_crop2full(pred_cam_crop, center, scale, full_img_shape, focal_length)
-    
-    
-    camera_center = torch.hstack((
-        torch.tensor([[img_w / 2.0]], device=device, dtype=torch.float32),
-        torch.tensor([[img_h / 2.0]], device=device, dtype=torch.float32)
-    )) / 2
-    '''
-    
-        
-
-        
-                            #transl=pred_cam_full)
-    
-    # Prepare the SMPL mesh.
-    
-    #if vertices.ndim == 3:
-    #    vertices = vertices[0]
-
-    
-    #if not isinstance(faces, np.ndarray):
-    #    faces = faces.cpu().numpy() if torch.is_tensor(faces) else faces
-
-
-    
-
-    
-    R_flip = tf.rotation_matrix(2*np.pi, [1, 1, 0])
-    mesh.apply_transform(R_flip)
-    mesh_pyrender = pyrender.Mesh.from_trimesh(mesh)
-
-    # Handle key presses for camera control and state change.
-    key = cv2.waitKey(1)
-    if key != -1:
-        if key == ord('q'):
-            return
-        elif key == ord('w'):
-            angle_x -= rotate_step
-        elif key == ord('s'):
-            angle_x += rotate_step
-        elif key == ord('a'):
-            angle_y -= rotate_step
-        elif key == ord('d'):
-            angle_y += rotate_step
-        elif key in [ord('+'), ord('=')]:
-            zoom_factor *= (1 - zoom_step)
-        elif key in [ord('-'), ord('_')]:
-            zoom_factor *= (1 + zoom_step)
-        elif key in [ord('1'), ord('2'), ord('3'), ord('4')]:
-            current_state = int(chr(key))
-            print(f"State changed to {current_state}")
-
-    # Compute camera pose.
-    mesh_extent = np.max(mesh.bounding_box.extents)
-    base_distance = mesh_extent * 2.5
-    camera_distance = base_distance * zoom_factor
-
-    R_x = np.array([
-        [1, 0, 0, 0],
-        [0, np.cos(angle_x), -np.sin(angle_x), 0],
-        [0, np.sin(angle_x), np.cos(angle_x), 0],
-        [0, 0, 0, 1]
-    ])
-    R_y = np.array([
-        [np.cos(angle_y), 0, np.sin(angle_y), 0],
-        [0, 1, 0, 0],
-        [-np.sin(angle_y), 0, np.cos(angle_y), 0],
-        [0, 0, 0, 1]
-    ])
-    T = np.array([
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 1, camera_distance],
-        [0, 0, 0, 1]
-    ])
-    cam_pose = R_y @ R_x @ T
-
-    # Build the pyrender scene.
-    #scene = pyrender.Scene()
-    #scene.add(mesh_pyrender)
-
-    # Recompute and add new arrows per frame.
-    if hasattr(pred_output, 'joints'):
-        #joints = pred_output.joints.cpu().detach().numpy()[0]  # shape (num_joints, 3)
-        # Subtract the same centroid to center the joints.
-        #joints_centered = joints - mesh_centroid
-        if current_state in STATE_CONFIG:
-            targets = STATE_CONFIG[current_state]['targets'](joints_centered)
-            for target in targets:
-                # Define a constant tail offset. Adjust this as necessary.
-                offset = np.array([0.0, -0.02, -0.4])
-                head_offset = np.array([0.0, 0.0, -0.1])
-                target = target +head_offset
-                tail = target + offset
-
-                arrow_mesh = create_arrow(tail, target,  shaft_radius=0.01,head_radius=0.03, head_length=0.08)
-                if arrow_mesh is not None:
-                    arrow_material = pyrender.MetallicRoughnessMaterial(baseColorFactor=(1.0, 0.0, 0.0, 1.0))
-                    arrow_mesh.apply_transform(R_flip)
-                    arrow_pyrender = pyrender.Mesh.from_trimesh(arrow_mesh, material=arrow_material, smooth=False)
-
-                    scene.add(arrow_pyrender)
-
-    #camera_obj = pyrender.PerspectiveCamera(yfov=np.pi / 3.0)
-    #scene.add(camera_obj, pose=cam_pose)
-    #light = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
-    #scene.add(light, pose=cam_pose)
-
-    #color, depth = offscreen_renderer.render(scene)
-    # Make a writable copy for overlaying text.
-    #color_writable = color.copy()
-    if current_state in STATE_CONFIG:
-        state_text = STATE_CONFIG[current_state]['text']
-        text_pos = (viewport_width - 500, 30)
-        cv2.putText(color_writable, state_text, text_pos,
-                    cv2.FONT_HERSHEY_TRIPLEX, 0.7, (255, 0, 0), 2, cv2.LINE_AA)
-
-
