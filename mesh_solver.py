@@ -245,7 +245,7 @@ class mesh_operator_paint_image:
     def _paint_uv(self, pixel, weights):
         position = barycentric_decode(weights, self._simplex_3d_b)
         u = int(position[0, 0])
-        v = int(self._image_height - 1 - position[0, 1])
+        v = int(position[0, 1])
         if ((u < 0) or (v < 0) or (u >= self._image_width) or (v >= self._image_height)):
             return
         x = int(pixel[0, 0])
