@@ -125,8 +125,8 @@ class mesh_operator_paint_solid:
         self._size = size
         self._color = color
         self._render_buffer = render_buffer
-        self._channels = render_buffer.shape[2]
         self._tolerance = tolerance
+        self._done_faces = set()
 
     def _paint_uv(self, pixel, weights):
         position = barycentric_decode(weights, self._simplex_3d)
@@ -136,10 +136,13 @@ class mesh_operator_paint_solid:
             return
         x = int(pixel[0, 0])
         y = int(pixel[0, 1])
-        self._render_buffer[y, x, :] = self._color[0:self._channels]
+        self._render_buffer[y, x, :] = self._color
         self._pixels_painted += 1
 
     def paint(self, face_index, level):
+        if (face_index in self._done_faces):
+            return
+        self._done_faces.add(face_index)
         vertex_indices = self._mesh_faces[face_index]
         self._simplex_3d = self._mesh_vertices[vertex_indices, :]
         self._pixels_painted = 0
@@ -147,12 +150,8 @@ class mesh_operator_paint_solid:
         return self._pixels_painted > 0
 
 
-#------------------------------------------------------------------------------
-#
-#------------------------------------------------------------------------------
-
 class mesh_operator_paint_image:
-    def __init__(self, mesh_vertices_a, mesh_faces_a, mesh_face_normals_a, uv_transform, mesh_faces_b, mesh_uvx_b, point, angle, scale, image_buffer, render_buffer, tolerance_align=1e-3, tolerance_uv=0):
+    def __init__(self, mesh_vertices_a, mesh_faces_a, mesh_face_normals_a, uv_transform, mesh_faces_b, mesh_uvx_b, point, align_prior, angle, scale, image_buffer, render_buffer, tolerance=0):
         self._mesh_vertices_a = mesh_vertices_a
         self._mesh_faces_a = mesh_faces_a
         self._mesh_face_normals_a = mesh_face_normals_a
@@ -160,43 +159,58 @@ class mesh_operator_paint_image:
         self._mesh_faces_b = mesh_faces_b
         self._mesh_uvx_b = mesh_uvx_b
         self._point = point
+        self._align_prior = align_prior
         self._angle = angle
         self._scale = scale
         self._image_buffer = image_buffer
         self._image_width = image_buffer.shape[1]
         self._image_height = image_buffer.shape[0]
         self._render_buffer = render_buffer
-        self._tolerance_align = tolerance_align
-        self._tolerance_uv = tolerance_uv
+        self._tolerance = tolerance
         self._out_source = np.array([[0, 0, 1]], dtype=mesh_face_normals_a.dtype)
-        self._align_axis_default = np.array([[1,0,0]], dtype=mesh_face_normals_a.dtype)
+        self._align_axis_default = np.array([[0, 1, 0]], dtype=mesh_face_normals_a.dtype)
+        self._image_center = np.array([[self._image_width // 2, self._image_height // 2, 0]], dtype=mesh_vertices_a.dtype)
+        self._done_faces = set()
 
     def paint(self, face_index, level):
+        if (face_index in self._done_faces):
+            return
+
         vertex_indices_a = self._mesh_faces_a[face_index]
         simplex_3d_a = self._mesh_vertices_a[vertex_indices_a, :]
         out_simplex_a = self._mesh_face_normals_a[face_index:(face_index + 1), :]
 
-        if (level == 0):            
-            align_axis = np.cross(out_simplex_a, self._out_source)
-            align_sin = np.linalg.norm(align_axis)
-            align_cos = np.clip(out_simplex_a @ self._out_source.T, -1, 1)
-            align_axis = (align_axis / align_sin) if (align_sin > self._tolerance_align) else self._align_axis_default
-            align_orientation = cv2.Rodrigues(align_axis * -np.arccos(align_cos))[0] @ cv2.Rodrigues((self._out_source * -self._angle))[0]
-            simplex_image_a = (((simplex_3d_a - self._point) @ align_orientation) * self._scale) + np.array([[self._image_width // 2, self._image_height // 2, 0]], dtype=simplex_3d_a.dtype)
+        if (level == 0):
+            vus = self._align_prior
+            vfs = out_simplex_a
+            vhs = np.cross(vus, vfs)
+
+            vud = self._align_axis_default
+            vfd = self._out_source
+            vhd = np.cross(vud, vfd)
+
+            align_orientation = np.linalg.inv(np.vstack((vus, vfs, vhs))) @ np.vstack((vud, vfd, vhd))
+            align_orientation = align_orientation @ cv2.Rodrigues((self._out_source * (-self._angle)))[0]
+
+            simplex_image_a = (((simplex_3d_a - self._point) @ align_orientation) * self._scale) + self._image_center
             simplex_image_a[:, 2] = 0
+
             self._image_uvx = {vertex_indices_a[i] : simplex_image_a[i:(i + 1), :] for i in range(0, 3)}
 
-        vt = [vertex_indices_a[i] in self._image_uvx for i in range(0, 3)]
-        count = vt[0] + vt[1] + vt[2]
+        vut = [vertex_indices_a[i] in self._image_uvx for i in range(0, 3)]
+        count = vut[0] + vut[1] + vut[2]
 
         if (count < 2):
             return False
 
         if (count == 2):
-            vip, viq, vix = (1, 2, 0) if (not vt[0]) else (2, 0, 1) if (not vt[1]) else (0, 1, 2)
+            # TODO: THIS UNWRAPPING METHOD IS AFFECTED BY THE ORDER IN WHICH FACES ARE PROCESSED
+            vip, viq, vix = (1, 2, 0) if (not vut[0]) else (2, 0, 1) if (not vut[1]) else (0, 1, 2)
+
             vps = simplex_3d_a[vip:(vip + 1), :]
             vqs = simplex_3d_a[viq:(viq + 1), :]
             vxs = simplex_3d_a[vix:(vix + 1), :]
+            
             vpd = self._image_uvx[vertex_indices_a[vip]]
             vqd = self._image_uvx[vertex_indices_a[viq]]
 
@@ -211,79 +225,35 @@ class mesh_operator_paint_image:
             vld = vld / vsd
             vod = self._out_source
             vnd = np.cross(vld, vod)
+            
+            align_orientation = np.linalg.inv(np.vstack((vls, vos, vns))) @ np.vstack((vld, vod, vnd))
+            align_scale = vsd / vss
 
-            r = np.linalg.inv(np.vstack((vls, vos, vns))) @ np.vstack((vld, vod, vnd))
-
-            vxd = (((vxs - vps) @ r) * (vsd / vss)) + vpd
+            vxd = (((vxs - vps) @ align_orientation) * (align_scale)) + vpd
+            vxd[:, 2] = 0
 
             self._image_uvx[vertex_indices_a[vix]] = vxd
+
+        self._done_faces.add(face_index)
 
         vertex_indices_b = self._mesh_faces_b[face_index]
         self._simplex_3d_b = np.vstack([self._image_uvx[vertex_index_a] for vertex_index_a in self._uv_transform[vertex_indices_b]])
         self._pixels_painted = 0
-        mesh_operation_uv(self._mesh_uvx_b[vertex_indices_b, :], self._paint_uv, self._tolerance_uv)
+        mesh_operation_uv(self._mesh_uvx_b[vertex_indices_b, :], self._paint_uv, self._tolerance)
         return self._pixels_painted > 0
     
     def _paint_uv(self, pixel, weights):
         position = barycentric_decode(weights, self._simplex_3d_b)
         u = int(position[0, 0])
-        v = int(position[0, 1])
+        v = int(self._image_height - 1 - position[0, 1])
         if ((u < 0) or (v < 0) or (u >= self._image_width) or (v >= self._image_height)):
             return
         x = int(pixel[0, 0])
         y = int(pixel[0, 1])
         self._render_buffer[y, x, :] = self._image_buffer[v, u, :]
         self._pixels_painted += 1
-            
-            
-            
 
 
-
-
-        
-        
-
-        
-        
-        
-            
-            
-            
-        
-            
-            
-            
-            
-            
-
-            
-            
-            
-            
-            
-
-            
-            
-
-            
-
-
-
-
-        
-
-    
-
-        
-
-
-        
-
-'''
-image hi x wi
-image si : scale ratio between image/texture | 1->pixel to pixel
-image uv_t: position in texture
-image uv_r: rotation in texture
-texture ht x wt
-'''
+#------------------------------------------------------------------------------
+#
+#------------------------------------------------------------------------------
