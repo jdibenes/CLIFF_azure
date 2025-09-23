@@ -128,6 +128,16 @@ class mesh_operator_paint_solid:
         self._tolerance = tolerance
         self._done_faces = set()
 
+    def paint(self, face_index, level):
+        if (face_index in self._done_faces):
+            return
+        self._done_faces.add(face_index)
+        vertex_indices = self._mesh_faces[face_index]
+        self._simplex_3d = self._mesh_vertices[vertex_indices, :]
+        self._pixels_painted = 0
+        mesh_operation_uv(self._mesh_uvx[vertex_indices, :], self._paint_uv, self._tolerance)
+        return self._pixels_painted > 0
+    
     def _paint_uv(self, pixel, weights):
         position = barycentric_decode(weights, self._simplex_3d)
         distance = np.linalg.norm(position - self._origin)
@@ -138,16 +148,6 @@ class mesh_operator_paint_solid:
         y = int(pixel[0, 1])
         self._render_buffer[y, x, :] = self._color
         self._pixels_painted += 1
-
-    def paint(self, face_index, level):
-        if (face_index in self._done_faces):
-            return
-        self._done_faces.add(face_index)
-        vertex_indices = self._mesh_faces[face_index]
-        self._simplex_3d = self._mesh_vertices[vertex_indices, :]
-        self._pixels_painted = 0
-        mesh_operation_uv(self._mesh_uvx[vertex_indices, :], self._paint_uv, self._tolerance)
-        return self._pixels_painted > 0
 
 
 class mesh_operator_paint_image:
