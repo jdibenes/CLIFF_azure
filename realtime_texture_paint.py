@@ -193,7 +193,8 @@ class demo:
         
         self._colormap, self._mesh_colors = create_colormap()
 
-        self._test_stamp = cv2.cvtColor(cv2.imread('./data/textures/stamp_test.jpg'), cv2.COLOR_BGR2RGB)
+        self._test_stamp = cv2.flip(cv2.cvtColor(cv2.imread('./data/textures/stamp_test.jpg'), cv2.COLOR_BGR2RGB), 0)
+
         alpha = np.ones(self._test_stamp.shape[0:2] + (1,), dtype=np.uint8) * 255
         self._test_stamp = np.dstack((self._test_stamp, alpha))
         print(self._test_stamp.shape)
@@ -379,7 +380,7 @@ class demo:
         align_prior = align_prior - (align_normal @ align_prior.T) * align_normal
         align_prior = align_prior / np.linalg.norm(align_prior)
 
-        mop = mesh_solver.mesh_operator_paint_image(mesh.vertices, mesh.faces, mesh.face_normals, self._uv_transform, faces_b, self._mesh_uvx_b, point.T, align_prior, 0, 10000 *2, self._test_stamp, self._texture_array)
+        mop = mesh_solver.mesh_operator_paint_image(mesh.vertices, mesh.faces, mesh.face_normals, self._uv_transform, faces_b, self._mesh_uvx_b, point.T, align_prior, 0, 10000 * 2, self._test_stamp, self._texture_array)
         mno = mesh_solver.mesh_neighborhood_operator(mesh, {face_index}, mop.paint)
         mno.invoke(5)
         print('END PAINT')
