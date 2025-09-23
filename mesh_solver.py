@@ -25,6 +25,32 @@ def load_uv_transform(filename_uv):
     return (uv_transform, mesh_faces_b, mesh_uv_b)
 
 
+def read_texture(texture, x, y, interpolate):
+    xf = math.floor(x)
+    yf = math.floor(y)
+
+    if (not interpolate):
+        return texture[yf, xf, :]
+
+    h, w = texture.shape[0:2]
+
+    a1 = x - xf
+    b1 = y - yf
+    a0 = 1 - a1
+    b0 = 1 - b1
+
+    if (xf < (w - 1)):
+        if (yf < (h - 1)):
+            return b0*(a0*texture[yf, xf, :] + a1*texture[yf, xf+1, :]) + b1*(a0*texture[yf+1, xf, :] + a1*texture[yf+1, xf+1, :])
+        else:
+            return a0*texture[yf, xf, :] + a1*texture[yf, xf+1, :]
+    else:
+        if (yf < (h - 1)):
+            return b0*texture[yf, xf, :] + b1*texture[yf+1, xf, :]
+        else:
+            return texture[yf, xf, :]
+
+
 def barycentric_create(simplex):
     return np.linalg.inv(np.vstack((simplex[0:2, :] - simplex[2:3, :], simplex[2:3, :])))
 
@@ -151,7 +177,7 @@ class mesh_operator_paint_solid:
 
 
 class mesh_operator_paint_image:
-    def __init__(self, mesh_vertices_a, mesh_faces_a, mesh_face_normals_a, uv_transform, mesh_faces_b, mesh_uvx_b, point, align_prior, angle, scale, image_buffer, render_buffer, tolerance=0):
+    def __init__(self, mesh_vertices_a, mesh_faces_a, mesh_face_normals_a, uv_transform, mesh_faces_b, mesh_uvx_b, point, align_prior, angle, scale, image_buffer, render_buffer, interpolate=True, tolerance=0):
         self._mesh_vertices_a = mesh_vertices_a
         self._mesh_faces_a = mesh_faces_a
         self._mesh_face_normals_a = mesh_face_normals_a
@@ -166,6 +192,7 @@ class mesh_operator_paint_image:
         self._image_width = image_buffer.shape[1]
         self._image_height = image_buffer.shape[0]
         self._render_buffer = render_buffer
+        self._interpolate = interpolate
         self._tolerance = tolerance
         self._out_source = np.array([[0, 0, 1]], dtype=mesh_face_normals_a.dtype)
         self._align_axis_default = np.array([[0, 1, 0]], dtype=mesh_face_normals_a.dtype)
@@ -244,13 +271,13 @@ class mesh_operator_paint_image:
     
     def _paint_uv(self, pixel, weights):
         position = barycentric_decode(weights, self._simplex_3d_b)
-        u = int(position[0, 0])
-        v = int(position[0, 1])
-        if ((u < 0) or (v < 0) or (u >= self._image_width) or (v >= self._image_height)):
+        u = position[0, 0]
+        v = position[0, 1]
+        if ((u < 0) or (v < 0) or (u > (self._image_width - 1)) or (v > (self._image_height - 1))):
             return
         x = int(pixel[0, 0])
         y = int(pixel[0, 1])
-        self._render_buffer[y, x, :] = self._image_buffer[v, u, :]
+        self._render_buffer[y, x, :] = read_texture(self._image_buffer, u, v, self._interpolate)
         self._pixels_painted += 1
 
 
@@ -258,5 +285,24 @@ class mesh_operator_paint_image:
 #
 #------------------------------------------------------------------------------
 
+
+
+class mesh_operator_paint_colormap(mesh_operator_paint_solid):
+    def __init__(self, mesh_vertices, mesh_faces, mesh_uvx, tolerance=0):
+        super().__init__(mesh_vertices, mesh_faces, mesh_uvx, None, None, None, None, tolerance)
+
+    def _paint_uv(self, pixel, weights):
+        position = barycentric_decode(weights, self._simplex_3d)
+        distance = np.linalg.norm(position - self._origin)
+        # TODO: THIS DISTANCE IS NOT GEODESIC
+        if (distance > self._size):
+            return
+        x = int(pixel[0, 0])
+        y = int(pixel[0, 1])
+        self._render_buffer[y, x, :] = self._color
+        self._pixels_painted += 1
+
+
+
+
 # "GAUSSIAN" brush
-# Bilinear interpolation for image paint
