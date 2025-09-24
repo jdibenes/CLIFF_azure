@@ -99,10 +99,11 @@ class mesh_neighborhood_builder:
         self._seen_vertex = set()
         self._iterations = 0
 
-    def fetch(self, faces):
+    def fetch(self, expand_faces, ignore_faces):
         result = set()
-        self._seen_face.update(faces)
-        for face_anchor in faces:
+        self._seen_face.update(expand_faces)
+        self._seen_face.update(ignore_faces)
+        for face_anchor in expand_faces:
             for vertex_index in self._mesh_faces[face_anchor]:
                 if (vertex_index not in self._seen_vertex):
                     self._seen_vertex.add(vertex_index)
@@ -118,22 +119,33 @@ class mesh_neighborhood_builder:
         return self._iterations
 
 
-class mesh_neighborhood_operator:
+class mesh_neighborhood_processor_command:
+    CONTINUE = 0
+    IGNORE = 1
+    EXPAND = 2
+
+
+class mesh_neighborhood_processor:
     def __init__(self, mesh, faces, callback):
         self._mnb = mesh_neighborhood_builder(mesh)
         self._faces = faces
         self._expand_faces = set()
+        self._ignore_faces = set()
         self._callback = callback
         self._done = False
 
     def invoke(self, max_iterations):
         for _ in range(0, max_iterations):
             if (len(self._expand_faces) > 0):
-                self._faces = self._mnb.fetch(self._expand_faces)
+                self._faces = self._mnb.fetch(self._expand_faces, self._ignore_faces)
                 self._expand_faces.clear()
+                self._ignore_faces.clear()
             for face_anchor in self._faces:
-                if (self._callback(face_anchor, self._mnb.level())):
+                code = self._callback(face_anchor, self._mnb.level())
+                if (code == mesh_neighborhood_processor_command.EXPAND):
                     self._expand_faces.add(face_anchor)
+                elif (code == mesh_neighborhood_processor_command.IGNORE):
+                    self._ignore_faces.add(face_anchor)
             if (len(self._expand_faces) < 1):
                 self._done = True
                 break
@@ -142,7 +154,7 @@ class mesh_neighborhood_operator:
         return self._done
 
 
-class mesh_operator_paint_solid:
+class mesh_neighborhood_operation_paint_solid:
     def __init__(self, mesh_vertices, mesh_faces, mesh_uvx, point, size, color, render_buffer, tolerance=0):
         self._mesh_vertices = mesh_vertices
         self._mesh_faces = mesh_faces
@@ -152,23 +164,19 @@ class mesh_operator_paint_solid:
         self._color = color
         self._render_buffer = render_buffer
         self._tolerance = tolerance
-        self._done_faces = set()
 
     def paint(self, face_index, level):
-        if (face_index in self._done_faces):
-            return
-        self._done_faces.add(face_index)
         vertex_indices = self._mesh_faces[face_index]
         self._simplex_3d = self._mesh_vertices[vertex_indices, :]
         self._pixels_painted = 0
         mesh_operation_uv(self._mesh_uvx[vertex_indices, :], self._paint_uv, self._tolerance)
-        return self._pixels_painted > 0
+        return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
     
     def _paint_uv(self, pixel, weights):
         position = barycentric_decode(weights, self._simplex_3d)
         distance = np.linalg.norm(position - self._origin)
         # TODO: THIS DISTANCE IS NOT GEODESIC
-        if (distance > self._size):
+        if (distance >= self._size):
             return
         x = int(pixel[0, 0])
         y = int(pixel[0, 1])
@@ -176,7 +184,7 @@ class mesh_operator_paint_solid:
         self._pixels_painted += 1
 
 
-class mesh_operator_paint_image:
+class mesh_neighborhood_operation_paint_image:
     def __init__(self, mesh_vertices_a, mesh_faces_a, mesh_face_normals_a, uv_transform, mesh_faces_b, mesh_uvx_b, point, align_prior, angle, scale, image_buffer, render_buffer, interpolate=True, tolerance=0):
         self._mesh_vertices_a = mesh_vertices_a
         self._mesh_faces_a = mesh_faces_a
@@ -197,12 +205,8 @@ class mesh_operator_paint_image:
         self._out_source = np.array([[0, 0, 1]], dtype=mesh_face_normals_a.dtype)
         self._align_axis_default = np.array([[0, 1, 0]], dtype=mesh_face_normals_a.dtype)
         self._image_center = np.array([[self._image_width // 2, self._image_height // 2, 0]], dtype=mesh_vertices_a.dtype)
-        self._done_faces = set()
 
     def paint(self, face_index, level):
-        if (face_index in self._done_faces):
-            return
-
         vertex_indices_a = self._mesh_faces_a[face_index]
         simplex_3d_a = self._mesh_vertices_a[vertex_indices_a, :]
         out_simplex_a = self._mesh_face_normals_a[face_index:(face_index + 1), :]
@@ -228,7 +232,7 @@ class mesh_operator_paint_image:
         count = vut[0] + vut[1] + vut[2]
 
         if (count < 2):
-            return False
+            return mesh_neighborhood_processor_command.CONTINUE
 
         if (count == 2):
             # TODO: THIS UNWRAPPING METHOD IS AFFECTED BY THE ORDER IN WHICH FACES ARE PROCESSED
@@ -261,13 +265,11 @@ class mesh_operator_paint_image:
 
             self._image_uvx[vertex_indices_a[vix]] = vxd
 
-        self._done_faces.add(face_index)
-
         vertex_indices_b = self._mesh_faces_b[face_index]
         self._simplex_3d_b = np.vstack([self._image_uvx[vertex_index_a] for vertex_index_a in self._uv_transform[vertex_indices_b]])
         self._pixels_painted = 0
         mesh_operation_uv(self._mesh_uvx_b[vertex_indices_b, :], self._paint_uv, self._tolerance)
-        return self._pixels_painted > 0
+        return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
     
     def _paint_uv(self, pixel, weights):
         position = barycentric_decode(weights, self._simplex_3d_b)
@@ -287,9 +289,12 @@ class mesh_operator_paint_image:
 
 
 
-class mesh_operator_paint_colormap(mesh_operator_paint_solid):
+
+class mesh_operator_paint_colormap(mesh_neighborhood_operation_paint_solid):
     def __init__(self, mesh_vertices, mesh_faces, mesh_uvx, tolerance=0):
         super().__init__(mesh_vertices, mesh_faces, mesh_uvx, None, None, None, None, tolerance)
+        self._origin = origin
+        self._size = size
 
     def _paint_uv(self, pixel, weights):
         position = barycentric_decode(weights, self._simplex_3d)
@@ -304,5 +309,6 @@ class mesh_operator_paint_colormap(mesh_operator_paint_solid):
 
 
 
-
 # "GAUSSIAN" brush
+
+
