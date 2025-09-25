@@ -48,6 +48,9 @@ def mesh_raycast(mesh, origin, direction):
 
 
 
+
+
+
 def texture_test_inside(texture, x, y):
     # ignore last row and column to simplify bilinear interpolation
     return (x >= 0) & (y >= 0) & (x < (texture.shape[1] - 1)) & (y < (texture.shape[0] - 1))
@@ -67,12 +70,25 @@ def texture_read(texture, x, y):
     x1 = x0 + 1
     y1 = y0 + 1
 
+    # sqrt space
     return b0 * (a0 * texture[y0, x0, :] + a1 * texture[y0, x1, :]) + b1 * (a0 * texture[y1, x0, :] + a1 * texture[y1, x1, :])
+
+
+def texture_alpha_blend(texture_1a, texture_a, alpha):
+    # linear space
+    return np.sqrt((1 - alpha) * np.square(texture_1a / 255) + alpha * np.square(texture_a / 255)) * 255
+
+
+def texture_alpha_remap(alpha, midpoint):
+    ah = alpha >= midpoint
+    al = alpha < midpoint
+    alpha[ah] = np.interp(alpha[ah], [midpoint, 1], [0.5, 1])
+    alpha[al] = np.interp(alpha[al], [0, midpoint], [0, 0.5])
+    return alpha
 
 
 def mesh_uv_processor(simplex_uvx, callback, tolerance=0):
     # uvx : [u * (w - 1), (1 - v) * (h - 1)]
-
     u = simplex_uvx[:, 0]
     v = simplex_uvx[:, 1]
 
@@ -87,10 +103,8 @@ def mesh_uv_processor(simplex_uvx, callback, tolerance=0):
         ab = (box - anchor) @ np.linalg.inv(simplex_uvx[0:2, :] - anchor)
         abc = np.hstack((ab, 1 - ab[:, 0:1] - ab[:, 1:2]))
         mask = np.logical_and.reduce(abc >= -tolerance, axis=1)
-        simplex = box[mask, :]
-        weights = abc[mask, :]
-        if (simplex.shape[0] > 0):
-            callback(simplex, weights)
+        if (np.any(mask)):
+            callback(box[mask, :], abc[mask, :])
 
 
 class mesh_neighborhood_builder:
@@ -157,53 +171,60 @@ class mesh_neighborhood_processor:
         return self._done
 
 
-class mesh_neighborhood_operation_paint_solid:
-    def __init__(self, mesh_vertices, mesh_faces, mesh_uvx, origin, size, color, render_buffer, tolerance=0):
+class mesh_neighborhood_operation_paint_brush:
+    def __init__(self, mesh_vertices, mesh_faces, mesh_uvx, origin, targets, tolerance=0):
         self._mesh_vertices = mesh_vertices
         self._mesh_faces = mesh_faces
         self._mesh_uvx = mesh_uvx
         self._origin = origin
-        self._size = size
-        self._color = color
-        self._render_buffer = render_buffer
+        self._targets = targets
         self._tolerance = tolerance
 
     def paint(self, face_index, level):
         vertex_indices = self._mesh_faces[face_index]
         self._simplex_3d = self._mesh_vertices[vertex_indices, :]
+        self._level = level
         mesh_uv_processor(self._mesh_uvx[vertex_indices, :], self._paint_uv, self._tolerance)
         return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
     
     def _paint_uv(self, pixels, weights):
         # TODO: THIS DISTANCE IS NOT GEODESIC
-        selection = pixels[np.linalg.norm((weights @ self._simplex_3d) - self._origin, axis=1) < self._size, :]
-        self._pixels_painted = selection.shape[0]
-        if (self._pixels_painted > 0):
+        distances = np.linalg.norm((weights @ self._simplex_3d) - self._origin, axis=1)
+        self._pixels_painted = 0
+        for target in self._targets:
+            self._pixels_painted += target(pixels, distances)
+
+
+class paint_brush_solid:
+    def __init__(self, size, color, render_buffer):
+        self._size = size
+        self._color = color
+        self._render_buffer = render_buffer
+
+    def paint(self, pixels, distances):
+        mask = distances < self._size
+        pixels_painted = np.count_nonzero(mask)
+        if (pixels_painted > 0):
+            selection = pixels[mask, :]
             self._render_buffer[selection[:, 1], selection[:, 0], :] = self._color
+        return pixels_painted
 
 
-class mesh_neighborhood_operation_paint_gradient(mesh_neighborhood_operation_paint_solid):
-    def __init__(self, mesh_vertices, mesh_faces, mesh_uvx, origin, size, color_center, color_edge, render_buffer, hardness=0, tolerance=0):
-        super().__init__(mesh_vertices, mesh_faces, mesh_uvx, origin, size, None, render_buffer, tolerance)
+class paint_brush_gradient:
+    def __init__(self, size, color_center, color_edge, hardness, render_buffer):
+        self._size = size
         self._color_center = color_center
         self._color_edge = color_edge
         self._hardness = hardness
+        self._render_buffer = render_buffer
 
-    def _paint_uv(self, pixels, weights):
-        # TODO: THIS DISTANCE IS NOT GEODESIC
-        distance = np.linalg.norm((weights @ self._simplex_3d) - self._origin, axis=1)
-        mask = distance < self._size
-        selection = pixels[mask, :]
-        self._pixels_painted = selection.shape[0]
-        if (self._pixels_painted > 0):
-            alpha = (distance[mask, np.newaxis] / self._size)
-            ah = alpha >= 0.5
-            al = alpha < 0.5
-            alpha[ah] = (2 * alpha[ah] - 1) * (1 - self._hardness) + self._hardness
-            alpha[al] = (2 * alpha[al]) * self._hardness
-            self._render_buffer[selection[:, 1], selection[:, 0], :] = (1 - alpha) * self._color_center + alpha * self._color_edge
-
-
+    def paint(self, pixels, distances):
+        mask = distances < self._size
+        pixels_painted = np.count_nonzero(mask)
+        if (pixels_painted > 0):
+            selection = pixels[mask, :]
+            self._render_buffer[selection[:, 1], selection[:, 0], :] = texture_alpha_blend(self._color_center, self._color_edge, texture_alpha_remap(distances[mask, np.newaxis] / self._size, self._hardness))
+        return pixels_painted
 
 
 
