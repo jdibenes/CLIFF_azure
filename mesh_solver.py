@@ -3,7 +3,6 @@ import numpy as np
 import trimesh.exchange.obj
 import math
 import cv2
-import time
 
 
 #------------------------------------------------------------------------------
@@ -26,29 +25,8 @@ def load_uv_transform(filename_uv):
     return (uv_transform, mesh_faces_b, mesh_uv_b)
 
 
-
-
-
-
-
 def geometry_align_basis(vas, vbs, vad, vbd):
     return np.linalg.inv(np.vstack((vas, vbs, np.cross(vas, vbs)))) @ np.vstack((vad, vbd, np.cross(vad, vbd)))
-
-
-
-
-
-
-
-
-def mesh_raycast(mesh, origin, direction):
-    point, rid, tid = mesh.ray.intersects_location(origin, direction, multiple_hits=False)
-    return (point, tid[0]) if (len(rid) > 0) else (None, None)
-
-
-
-
-
 
 
 def texture_test_inside(texture, x, y):
@@ -79,11 +57,11 @@ def texture_alpha_blend(texture_1a, texture_a, alpha):
     return np.sqrt((1 - alpha) * np.square(texture_1a / 255) + alpha * np.square(texture_a / 255)) * 255
 
 
-def texture_alpha_remap(alpha, midpoint):
-    ah = alpha >= midpoint
-    al = alpha < midpoint
-    alpha[ah] = np.interp(alpha[ah], [midpoint, 1], [0.5, 1])
-    alpha[al] = np.interp(alpha[al], [0, midpoint], [0, 0.5])
+def texture_alpha_remap(alpha, src, dst):
+    ah = alpha >= src[1]
+    al = alpha < src[1]
+    alpha[ah] = np.interp(alpha[ah], [src[1], src[2]], [dst[1], dst[1]])
+    alpha[al] = np.interp(alpha[al], [src[0], src[1]], [dst[0], dst[1]])
     return alpha
 
 
@@ -171,7 +149,7 @@ class mesh_neighborhood_processor:
         return self._done
 
 
-class mesh_neighborhood_operation_paint_brush:
+class mesh_neighborhood_operation_brush:
     def __init__(self, mesh_vertices, mesh_faces, mesh_uvx, origin, targets, tolerance=0):
         self._mesh_vertices = mesh_vertices
         self._mesh_faces = mesh_faces
@@ -195,7 +173,7 @@ class mesh_neighborhood_operation_paint_brush:
             self._pixels_painted += target(pixels, distances)
 
 
-class paint_brush_solid:
+class brush_solid:
     def __init__(self, size, color, render_buffer):
         self._size = size
         self._color = color
@@ -210,37 +188,32 @@ class paint_brush_solid:
         return pixels_painted
 
 
-class paint_brush_gradient:
+class brush_gradient:
     def __init__(self, size, color_center, color_edge, hardness, render_buffer):
         self._size = size
         self._color_center = color_center
         self._color_edge = color_edge
-        self._hardness = hardness
         self._render_buffer = render_buffer
+        self._src = [0, hardness, 1]
+        self._dst = [0, 0.5, 1]
 
     def paint(self, pixels, distances):
         mask = distances < self._size
         pixels_painted = np.count_nonzero(mask)
         if (pixels_painted > 0):
             selection = pixels[mask, :]
-            self._render_buffer[selection[:, 1], selection[:, 0], :] = texture_alpha_blend(self._color_center, self._color_edge, texture_alpha_remap(distances[mask, np.newaxis] / self._size, self._hardness))
+            self._render_buffer[selection[:, 1], selection[:, 0], :] = texture_alpha_blend(self._color_center, self._color_edge, texture_alpha_remap(distances[mask, np.newaxis] / self._size, self._src, self._dst))
         return pixels_painted
 
 
-
-
-
-
-
-class mesh_neighborhood_operation_paint_image:
-    def __init__(self, mesh_vertices_a, mesh_faces_a, mesh_face_normals_a, uv_transform, mesh_faces_b, mesh_uvx_b, point, align_prior, angle, scale, image_buffer, render_buffer, tolerance=0):
-        self._mesh_vertices_a = mesh_vertices_a
-        self._mesh_faces_a = mesh_faces_a
-        self._mesh_face_normals_a = mesh_face_normals_a
+class mesh_neighborhood_operation_decal:
+    def __init__(self, mesh_vertices, mesh_faces, mesh_face_normals, mesh_uvx, uv_transform, origin, align_prior, angle, scale, image_buffer, render_buffer, tolerance=0):
+        self._mesh_vertices = mesh_vertices
+        self._mesh_faces = mesh_faces
+        self._mesh_face_normals = mesh_face_normals
+        self._mesh_uvx = mesh_uvx
         self._uv_transform = uv_transform
-        self._mesh_faces_b = mesh_faces_b
-        self._mesh_uvx_b = mesh_uvx_b
-        self._point = point
+        self._origin = origin
         self._align_prior = align_prior
         self._angle = angle
         self._scale = scale
@@ -249,96 +222,63 @@ class mesh_neighborhood_operation_paint_image:
         self._tolerance = tolerance
 
     def paint(self, face_index, level):
-        vertex_indices_a = self._mesh_faces_a[face_index]
-        simplex_3d_a = self._mesh_vertices_a[vertex_indices_a, :]
-        face_normal_a = self._mesh_face_normals_a[face_index:(face_index + 1), :]
-
+        face_normal = self._mesh_face_normals[face_index:(face_index + 1), :]        
+        vertex_indices_b = self._mesh_faces[face_index]
+        vertex_indices_a = self._uv_transform[vertex_indices_b]
+        
         if (level == 0):
-            self._align_axis = np.array([[0, 1, 0]], dtype=self._mesh_face_normals_a.dtype)
-            self._uvx_normal = np.array([[0, 0, 1]], dtype=self._mesh_face_normals_a.dtype)        
-
-            simplex_image_a = ((simplex_3d_a - self._point) @ geometry_align_basis(self._align_prior, face_normal_a, self._align_axis * self._scale, self._uvx_normal) @ cv2.Rodrigues(self._uvx_normal * self._angle)[0].T) + np.array([[self._image_buffer.shape[1] // 2, self._image_buffer.shape[0] // 2, 0]], dtype=self._mesh_vertices_a.dtype)
-            simplex_image_a[:, 2] = 0
-
-            self._image_uvx = {vertex_indices_a[i] : simplex_image_a[i:(i + 1), :] for i in range(0, 3)}
-
-        vt = [vertex_indices_a[i] in self._image_uvx for i in range(0, 3)]
-        count = vt[0] + vt[1] + vt[2]
-
-        if (count <= 1):
-            return mesh_neighborhood_processor_command.CONTINUE
-
-        if (count == 2):
-            # TODO: THIS UNWRAPPING METHOD IS AFFECTED BY THE ORDER IN WHICH FACES ARE PROCESSED
-            vip, viq, vix = (1, 2, 0) if (not vt[0]) else (2, 0, 1) if (not vt[1]) else (0, 1, 2)
-
-            vps = simplex_3d_a[vip:(vip + 1), :]
-            vqs = simplex_3d_a[viq:(viq + 1), :]
-            vxs = simplex_3d_a[vix:(vix + 1), :]
+            self._align_axis = np.array([[0, 1, 0]], dtype=self._mesh_face_normals.dtype)
+            self._uvx_normal = np.array([[0, 0, 1]], dtype=self._mesh_face_normals.dtype)
+            self._image_uvx = np.ones_like(self._mesh_vertices)
             
-            vpd = self._image_uvx[vertex_indices_a[vip]]
-            vqd = self._image_uvx[vertex_indices_a[viq]]
+            vps = self._origin
+            vxs = self._mesh_vertices[vertex_indices_b, :]
+            vpd = np.array([[self._image_buffer.shape[1] // 2, self._image_buffer.shape[0] // 2, 0]], dtype=self._mesh_vertices.dtype)
 
-            vxd = ((vxs - vps) @ geometry_align_basis(vqs - vps, face_normal_a, vqd - vpd, self._uvx_normal)) + vpd
+            align_outward = geometry_align_basis(self._align_prior, face_normal, self._align_axis * self._scale, self._uvx_normal)
+            align_simplex = cv2.Rodrigues(self._uvx_normal * self._angle)[0].T
+            
+            vxd = (((vxs - vps) @ align_outward) @ align_simplex) + vpd
             vxd[:, 2] = 0
 
-            self._image_uvx[vertex_indices_a[vix]] = vxd
+            self._image_uvx[vertex_indices_a, :] = vxd
 
-        vertex_indices_b = self._mesh_faces_b[face_index]
-        self._simplex_3d_b = np.vstack([self._image_uvx[vertex_index_a] for vertex_index_a in self._uv_transform[vertex_indices_b]])
-        mesh_uv_processor(self._mesh_uvx_b[vertex_indices_b, :], self._paint_uv, self._tolerance)
+        unwrapped = self._image_uvx[vertex_indices_a, 2] == 0
+        unwrapped_count = unwrapped.sum()
+
+        if (unwrapped_count <= 1):
+            return mesh_neighborhood_processor_command.CONTINUE
+
+        if (unwrapped_count == 2):
+            # TODO: THIS UNWRAPPING METHOD IS AFFECTED BY THE ORDER IN WHICH FACES ARE PROCESSED
+            unwrapped_indices = [1, 2, 0] if (not unwrapped[0]) else [2, 0, 1] if (not unwrapped[1]) else [0, 1, 2]
+
+            vips_a, viqs_a, vixs_a = vertex_indices_a[unwrapped_indices]
+            vips_b, viqs_b, vixs_b = vertex_indices_b[unwrapped_indices]
+
+            vps = self._mesh_vertices[vips_b:(vips_b + 1), :]
+            vqs = self._mesh_vertices[viqs_b:(viqs_b + 1), :]
+            vxs = self._mesh_vertices[vixs_b:(vixs_b + 1), :]
+            vpd = self._image_uvx[vips_a:(vips_a + 1), :]
+            vqd = self._image_uvx[viqs_a:(viqs_a + 1), :]
+
+            align_outward = geometry_align_basis(vqs - vps, face_normal, vqd - vpd, self._uvx_normal)
+
+            vxd = ((vxs - vps) @ align_outward) + vpd
+            vxd[:, 2] = 0
+
+            self._image_uvx[vixs_a:(vixs_a + 1), :] = vxd
+
+        self._simplex_3d_b = self._image_uvx[vertex_indices_a, 0:2]
+        mesh_uv_processor(self._mesh_uvx[vertex_indices_b, :], self._paint_uv, self._tolerance)
         return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
 
     def _paint_uv(self, pixels_dst, weights):
         pixels_src = weights @ self._simplex_3d_b
         mask = texture_test_inside(self._image_buffer, pixels_src[:, 0], pixels_src[:, 1])
-        dst = pixels_dst[mask, :]
-        src = pixels_src[mask, :]
-        self._pixels_painted = dst.shape[0]
+        self._pixels_painted = np.count_nonzero(mask)
         if (self._pixels_painted > 0):
+            dst = pixels_dst[mask, :]
+            src = pixels_src[mask, :]
             self._render_buffer[dst[:, 1], dst[:, 0], :] = texture_read(self._image_buffer, src[:, 0], src[:, 1])
 
-
-#------------------------------------------------------------------------------
-#
-#------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# "GAUSSIAN" brush
-
-
-
-
-'''
-def barycentric_create(simplex):
-    # simplex plane must not pass through the origin
-    #return np.linalg.inv(np.vstack((simplex[0:2, :] - simplex[2:3, :], simplex[2:3, :])))
-    o = simplex[2:3, :]
-    d = simplex[0:2, :] - o
-    #return (np.linalg.pinv(d), o)
-    return (d.T @ np.linalg.inv(d @ d.T), o)
-
-
-
-def barycentric_encode(vertex, transform):
-    weights = ((vertex - transform[1]) @ transform[0])[0, :]
-    #weights = (vertex @ transform)[0, :]
-    #weights[2] = 1 - weights[0] - weights[1]
-    return np.append(weights, 1 - weights[0] - weights[1])
-
-
-def barycentric_decode(weights, simplex):
-    return (weights[0] * simplex[0:1, :]) + (weights[1] * simplex[1:2, :]) + (weights[2] * simplex[2:3, :])
-'''
