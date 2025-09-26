@@ -1,4 +1,5 @@
 
+import time
 import numpy as np
 import trimesh.exchange.obj
 import math
@@ -17,11 +18,11 @@ def geometry_align_basis(vas, vbs, vad, vbd):
 # Texture Processing
 #------------------------------------------------------------------------------
 
-def texture_load_image(filename_image):
+def texture_load_image(filename_image, alpha=255):
     image_array = cv2.cvtColor(cv2.imread(filename_image, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
     channels = image_array.shape[2]
     if (channels == 3):
-        image_array = np.dstack((image_array, np.ones((image_array.shape[0], image_array.shape[1], 1), dtype=np.uint8) * 255))
+        image_array = np.dstack((image_array, np.ones((image_array.shape[0], image_array.shape[1], 1), dtype=np.uint8) * alpha))
     return image_array
 
 
@@ -312,4 +313,25 @@ class mesh_neighborhood_operation_decal:
             dst = pixels_dst[mask, :]
             src = pixels_src[mask, :]
             self._render_buffer[dst[:, 1], dst[:, 0], :] = texture_read(self._image_buffer, src[:, 0], src[:, 1])
+
+
+def mesh_create_painter_brush(mesh_a, mesh_b, mesh_uvx, face_index, origin, brushes, tolerance=0):
+    mno = mesh_neighborhood_operation_brush(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_uvx, origin, brushes, tolerance)
+    mnp = mesh_neighborhood_processor(mesh_a, {face_index}, mno.paint)
+    return mnp
+
+
+def mesh_create_painter_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, origin, align_prior, angle, scale, image_buffer, render_buffer, tolerance=0):
+    mno = mesh_neighborhood_operation_decal(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_b.face_normals, mesh_uvx, uv_transform, origin, align_prior, angle, scale, image_buffer, render_buffer, tolerance)
+    mnp = mesh_neighborhood_processor(mesh_a, {face_index}, mno.paint)
+    return mnp
+
+
+def mesh_neighborhood_processor_execute(mnp, timeout, steps=1):
+    start = time.perf_counter()
+    while (not mnp.done()):
+        mnp.invoke(steps)
+        if (time.perf_counter() - start >= timeout):
+            break
+    return mnp.done()
 
