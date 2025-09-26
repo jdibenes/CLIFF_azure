@@ -6,10 +6,26 @@ import cv2
 
 
 #------------------------------------------------------------------------------
-#
+# Geometry
 #------------------------------------------------------------------------------
 
-def load_uv_transform(filename_uv):
+def geometry_align_basis(vas, vbs, vad, vbd):
+    return np.linalg.inv(np.vstack((vas, vbs, np.cross(vas, vbs)))) @ np.vstack((vad, vbd, np.cross(vad, vbd)))
+
+
+#------------------------------------------------------------------------------
+# Texture Processing
+#------------------------------------------------------------------------------
+
+def texture_load_image(filename_image):
+    image_array = cv2.cvtColor(cv2.imread(filename_image, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+    channels = image_array.shape[2]
+    if (channels == 3):
+        image_array = np.dstack((image_array, np.ones((image_array.shape[0], image_array.shape[1], 1), dtype=np.uint8) * 255))
+    return image_array
+
+
+def texture_load_uv(filename_uv):
     with open(filename_uv, 'r') as obj_file:
         obj_mesh_a = trimesh.exchange.obj.load_obj(obj_file, maintain_order=True)
     with open(filename_uv, 'r') as obj_file:
@@ -25,8 +41,15 @@ def load_uv_transform(filename_uv):
     return (uv_transform, mesh_faces_b, mesh_uv_b)
 
 
-def geometry_align_basis(vas, vbs, vad, vbd):
-    return np.linalg.inv(np.vstack((vas, vbs, np.cross(vas, vbs)))) @ np.vstack((vad, vbd, np.cross(vad, vbd)))
+def texture_uv_to_uvx(uv, image_shape):
+    uv[:, 0] = uv[:, 0] * (image_shape[1] - 1)
+    uv[:, 1] = (1 - uv[:, 1]) * (image_shape[0] - 1)
+    return uv
+
+
+def texture_uvx_invert(uvx, image_shape, axis):
+    uvx[:, axis] = (image_shape[1 - axis] - 1) - uvx[:, axis]
+    return uvx
 
 
 def texture_test_inside(texture, x, y):
@@ -65,7 +88,7 @@ def texture_alpha_remap(alpha, src, dst):
     return alpha
 
 
-def mesh_uv_processor(simplex_uvx, callback, tolerance=0):
+def texture_processor(simplex_uvx, callback, tolerance=0):
     # uvx : [u * (w - 1), (1 - v) * (h - 1)]
     u = simplex_uvx[:, 0]
     v = simplex_uvx[:, 1]
@@ -84,6 +107,10 @@ def mesh_uv_processor(simplex_uvx, callback, tolerance=0):
         if (np.any(mask)):
             callback(box[mask, :], abc[mask, :])
 
+
+#------------------------------------------------------------------------------
+# Mesh Neighborhood Processing
+#------------------------------------------------------------------------------
 
 class mesh_neighborhood_builder:
     def __init__(self, mesh):
@@ -149,6 +176,10 @@ class mesh_neighborhood_processor:
         return self._done
 
 
+#------------------------------------------------------------------------------
+# Mesh Painting
+#------------------------------------------------------------------------------
+
 class mesh_neighborhood_operation_brush:
     def __init__(self, mesh_vertices, mesh_faces, mesh_uvx, origin, targets, tolerance=0):
         self._mesh_vertices = mesh_vertices
@@ -162,7 +193,7 @@ class mesh_neighborhood_operation_brush:
         vertex_indices = self._mesh_faces[face_index]
         self._simplex_3d = self._mesh_vertices[vertex_indices, :]
         self._level = level
-        mesh_uv_processor(self._mesh_uvx[vertex_indices, :], self._paint_uv, self._tolerance)
+        texture_processor(self._mesh_uvx[vertex_indices, :], self._paint_uv, self._tolerance)
         return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
     
     def _paint_uv(self, pixels, weights):
@@ -270,11 +301,11 @@ class mesh_neighborhood_operation_decal:
             self._image_uvx[vixs_a:(vixs_a + 1), :] = vxd
 
         self._simplex_3d_b = self._image_uvx[vertex_indices_a, 0:2]
-        mesh_uv_processor(self._mesh_uvx[vertex_indices_b, :], self._paint_uv, self._tolerance)
+        texture_processor(self._mesh_uvx[vertex_indices_b, :], self._paint_uv, self._tolerance)
         return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
 
-    def _paint_uv(self, pixels_dst, weights):
-        pixels_src = weights @ self._simplex_3d_b
+    def _paint_uv(self, pixels_dst, weights):        
+        pixels_src = texture_uvx_invert(weights @ self._simplex_3d_b, self._image_buffer.shape, 1)
         mask = texture_test_inside(self._image_buffer, pixels_src[:, 0], pixels_src[:, 1])
         self._pixels_painted = np.count_nonzero(mask)
         if (self._pixels_painted > 0):
