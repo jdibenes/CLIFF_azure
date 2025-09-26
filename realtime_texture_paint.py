@@ -5,6 +5,7 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 import math
+import time
 
 import torch
 from torch.utils.data import DataLoader
@@ -137,38 +138,13 @@ def create_model(img_shape):
 # mesh_b = 7576 vertices 13776 faces 7576 uvs
 # same faces, duplicated vertices for vertices with multiple uv's
 
-
-def create_colormap():
-    # Create colormap
-    colormap = cv2.applyColorMap(np.arange(0, 256, 1, dtype=np.uint8), cv2.COLORMAP_AUTUMN)
-    colormap = colormap[:, :, ::-1]
-    colormap = np.dstack((colormap, 255 * np.ones(colormap.shape[0:2] + (1,), dtype=colormap.dtype)))
-
-    mesh_colors = np.zeros((6890, 4), dtype=np.uint8)
-    mesh_colors[:, 0] = 102
-    mesh_colors[:, 1] = 102
-    mesh_colors[:, 2] = 102
-    mesh_colors[:, 3] = 255
-
-    return (colormap, mesh_colors)
+def mesh_raycast(mesh, origin, direction):
+    point, rid, tid = mesh.ray.intersects_location(origin, direction, multiple_hits=False)
+    return (point, tid[0]) if (len(rid) > 0) else (None, None)
 
 
-def load_texture(filename, uv):
-    texture_image = Image.open(filename)
-    mesh_visuals = trimesh.visual.TextureVisuals(uv=uv, image=texture_image)
-    texture_array = np.array(texture_image)
-    overlay_array = np.zeros_like(texture_array)
-    return (mesh_visuals, texture_array, overlay_array)
-
-
-    
 class demo:
     def run(self, args):
-        
-
-
-
-
         # Set up the webcam and offscreen pyrender renderer.
         cap = visualizer.camera_opencv()
         cap.open()
@@ -183,40 +159,15 @@ class demo:
 
         frame = frame_data['color']        
         self._device, self._cliff_model, self._bbox_info, self._smpl = create_model(frame.shape)
-        self._uv_transform, self._mesh_faces_b, self._mesh_uv_b = mesh_solver.load_uv_transform('./data/smpl_uv.obj')
+        self._uv_transform, self._mesh_faces_b, self._mesh_uv_b = mesh_solver.texture_load_uv('./data/smpl_uv.obj')
         #tex_filename = './data/textures/f_01_alb.002_test.png'
         tex_filename = './data/textures/smpl_uv_20200910.png'
-        self._mesh_visuals, self._texture_array, self._overlay_array = load_texture(tex_filename, self._mesh_uv_b)
-        self._mesh_uvx_b = np.ones((self._mesh_uv_b.shape[0], 3), dtype=self._mesh_uv_b.dtype) #self._mesh_uv_b.copy()
-        self._mesh_uvx_b[:, 0] = self._mesh_uv_b[:, 0] * (self._texture_array.shape[1] - 1)
-        self._mesh_uvx_b[:, 1] = (1 - self._mesh_uv_b[:, 1]) * (self._texture_array.shape[0] - 1)
-        
-        self._colormap, self._mesh_colors = create_colormap()
+        self._texture_array = mesh_solver.texture_load_image(tex_filename)
+        self._mesh_visuals = trimesh.visual.TextureVisuals(uv=self._mesh_uv_b, image=Image.fromarray(self._texture_array))
 
-        self._test_stamp = cv2.flip(cv2.cvtColor(cv2.imread('./data/textures/stamp_test.jpg'), cv2.COLOR_BGR2RGB), 0)
+        self._mesh_uvx_b = mesh_solver.texture_uv_to_uvx(self._mesh_uv_b.copy(), self._texture_array.shape)
+        self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
 
-        alpha = np.ones(self._test_stamp.shape[0:2] + (1,), dtype=np.uint8) * 255
-        self._test_stamp = np.dstack((self._test_stamp, alpha))
-        print(self._test_stamp.shape)
-
-
-
-        
-
-
-        
-        
-
-        #print(mesh_visuals.material.image)
-        #pxmap = mesh_visuals.material.image.load()
-        #for i in range(0, 512):
-        #    for j in range(0, 512):
-        #        pxmap[i, j] = (255, 0, 0, 255)
-        
-
-        
-
-        
         # Initialize visualization utilities
         viewport_width, viewport_height = 1280, 720
         camera_yfov = np.pi / 3
@@ -239,8 +190,6 @@ class demo:
         self._next_region = 0
         self._pointer_position = [0, 0]
         self._pointer_size = 0.05
-
-       
 
         di = 0.02
         da = (10/180) * np.pi
@@ -366,28 +315,32 @@ class demo:
         vertices_b = mesh.vertices[self._uv_transform, :]
         faces_b = self._mesh_faces_b
 
-
-
+        start_time = time.perf_counter()
         mesh2 = trimesh.Trimesh(vertices=vertices_b, faces=faces_b, visual=self._mesh_visuals, process=False)
+        end_time = time.perf_counter()
+        print(f'MESH2 time {end_time-start_time}')
 
-        #mop = mesh_solver.mesh_operator_paint_solid(vertices_b, faces_b, self._mesh_uvx_b, point.T, 0.01, (255, 0, 0, 255), self._texture_array)
-        #mno = mesh_solver.mesh_neighborhood_operator(mesh, {face_index}, mop.paint)
-        #mno.invoke(3)
+        start_time = time.perf_counter()
+        #mob = mesh_solver.brush_gradient(0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, self._texture_array)
+        #mob2 = mesh_solver.brush_solid(0.02, np.array([255, 0, 0, 255], dtype=np.uint8), self._texture_array)
+        #mno = mesh_solver.painter_create_brush(mesh, mesh2, self._mesh_uvx_b, face_index, point.T, [mob2.paint, mob.paint])
+        #mno.invoke_timeslice(0.010)
+        end_time = time.perf_counter()
+        print(f'paint solid time {end_time-start_time} proc')
 
-        print('BEGIN PAINT')
         align_prior = np.array([[0, 1, 0]], dtype=np.float32)
         align_normal = mesh.face_normals[face_index:(face_index+1), :]
         align_prior = align_prior - (align_normal @ align_prior.T) * align_normal
         align_prior = align_prior / np.linalg.norm(align_prior)
 
-        mop = mesh_solver.mesh_operator_paint_image(mesh.vertices, mesh.faces, mesh.face_normals, self._uv_transform, faces_b, self._mesh_uvx_b, point.T, align_prior, 0, 10000 * 2, self._test_stamp, self._texture_array)
-        mno = mesh_solver.mesh_neighborhood_operator(mesh, {face_index}, mop.paint)
-        mno.invoke(5)
-        print('END PAINT')
-
+        start_time = time.perf_counter()
+        mob = mesh_solver.decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._texture_array)
+        mno = mesh_solver.painter_create_decal(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, [mob.paint])
+        mno.invoke_timeslice(0.010)
+        end_time = time.perf_counter()
+        print(f'paint image time {end_time-start_time} proc')
         
         mesh2.visual.material.image.frombytes(self._texture_array.tobytes())
-
 
         self._scene_control.set_smpl_mesh(mesh2)
         self._scene_control.clear_group('arrows')
@@ -411,33 +364,32 @@ if __name__ == '__main__':
 
 
 
-        #faces_b_test = faces_b[face_index]
-        #uvs_b_test = self._mesh_uv_b[faces_b_test, :]
-        
-        #cv2.imshow('tex', self._texture_array)
-        #cv2.waitKey(0)
+#def load_texture(filename, uv):
+#    texture_image = Image.open(filename)
+#    mesh_visuals = trimesh.visual.TextureVisuals(uv=uv, image=texture_image)
+#    texture_array = np.array(texture_image)
+#    overlay_array = np.zeros_like(texture_array)
+#    return (mesh_visuals, texture_array, overlay_array)
 
-        #paint_fragment(self._texture_array, uvs_b_test, np.array([[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]], dtype=self._texture_array.dtype), 0)
 
+#print(mesh_visuals.material.image)
+        #pxmap = mesh_visuals.material.image.load()
+        #for i in range(0, 512):
+        #    for j in range(0, 512):
+        #        pxmap[i, j] = (255, 0, 0, 255)
 
-        #colors = self._mesh_colors.copy()
-        #if ((selected_indices is not None) and (distances is not None)):
-        #    for vertex_index in selected_indices:
-        #        colors[vertex_index, :] = self._colormap[min([int(255*(distances[vertex_index] / max([self._pointer_size, 0.001]))),255]), 0, :]
+'''
+def create_colormap():
+    # Create colormap
+    colormap = cv2.applyColorMap(np.arange(0, 256, 1, dtype=np.uint8), cv2.COLORMAP_AUTUMN)
+    colormap = colormap[:, :, ::-1]
+    colormap = np.dstack((colormap, 255 * np.ones(colormap.shape[0:2] + (1,), dtype=colormap.dtype)))
 
-        
-        #colors_b = colors[self._uv_transform, :]
-        
+    mesh_colors = np.zeros((6890, 4), dtype=np.uint8)
+    mesh_colors[:, 0] = 102
+    mesh_colors[:, 1] = 102
+    mesh_colors[:, 2] = 102
+    mesh_colors[:, 3] = 255
 
-        #for i in range(0, len(faces_b)):
-        #    faces_b_test = faces_b[i]
-        #    vertices_b_test = vertices_b[faces_b_test, :]
-        #    vertex_b_test = 1/3 * vertices_b_test[0, :] + 1/3 * vertices_b_test[1, :] + 1/3 * vertices_b_test[2, :]
-        #    uv_b_test = map_3d_to_texture_uv(vertex_b_test, vertices_b_test, self._uv_array[faces_b_test, :])
-        #    self._texture_array[int((1 - uv_b_test[1]) * 1023), int(uv_b_test[0] * 1023), :] = (255, 0, 0, 255)
-
-        #for i in range(0, len(faces_b)):
-                #self._mesh_visuals.material.image.frombytes(self._texture_array.tobytes())
-        #mesh_solver.mesh_paint(mesh, vertices_b, faces_b, self._texture_array, self._mesh_uvx_b, point.T, face_index, 1, 5)
-        #nb = mesh_solver.mesh_builder_neighborhood(mesh)
-        #mesh_solver.mesh_operation_uv_neighborhood(nb, {face_index}, mop.paint)
+    return (colormap, mesh_colors)
+'''
