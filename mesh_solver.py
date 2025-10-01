@@ -47,12 +47,32 @@ def texture_load_uv(filename_uv):
     return (uv_transform, mesh_faces_b, mesh_uv_b)
 
 
-def texture_create_text(text, font_name, font_size, font_color, bg_color=(0, 0, 0, 0), stroke_width=0):
+def texture_create_text(text_list, font_name, font_size, font_color, bg_color=(0, 0, 0, 0), stroke_width=0, spacing=4, pad_factor=(0.0, 0.0)):
     font = ImageFont.truetype(font_name, font_size)
-    bbox = font.getbbox(text, stroke_width=stroke_width)
-    image = Image.new('RGBA', (bbox[2], bbox[3]), bg_color)
-    ImageDraw.Draw(image).text((0, 0), text, font_color, font, stroke_width=stroke_width)
-    return np.array(image.crop(bbox))
+    arrays = []
+    for text in text_list:
+        bbox = font.getbbox(text, stroke_width=stroke_width)
+        image = Image.new('RGBA', (bbox[2], bbox[3]), bg_color)
+        ImageDraw.Draw(image).text((0, 0), text, font_color, font, stroke_width=stroke_width)
+        arrays.append(np.array(image.crop(bbox)))
+    image_count = len(arrays)
+    if (image_count > 1):
+        full_w = np.max([array.shape[1] for array in arrays])
+        padded_arrays = []
+        for i, array in enumerate(arrays):
+            w = array.shape[1]
+            count = full_w - w
+            pad_l = count // 2
+            pad_r = count - pad_l
+            padded_arrays.append(cv2.copyMakeBorder(array, 0 if (i == 0) else spacing, 0, pad_l, pad_r, cv2.BORDER_CONSTANT, value=bg_color))
+        composite = np.vstack(padded_arrays)
+    else:
+        composite = arrays[0]
+    h, w = composite.shape[0:2]
+    pad_x = math.ceil(w * pad_factor[0])
+    pad_y = math.ceil(h * pad_factor[1])
+    composite = cv2.copyMakeBorder(composite, pad_y, pad_y, pad_x, pad_x, cv2.BORDER_CONSTANT, value=bg_color)
+    return composite
 
 
 def texture_create_visual(uv, texture):
