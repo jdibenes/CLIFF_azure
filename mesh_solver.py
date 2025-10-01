@@ -1,9 +1,14 @@
 
 import time
 import numpy as np
-import trimesh.exchange.obj
 import math
 import cv2
+import pyrender
+
+import trimesh.visual
+import trimesh.exchange.obj
+
+from PIL import Image, ImageFont, ImageDraw
 
 
 #------------------------------------------------------------------------------
@@ -22,24 +27,36 @@ def texture_load_image(filename_image, alpha=255):
     image_array = cv2.cvtColor(cv2.imread(filename_image, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
     channels = image_array.shape[2]
     if (channels == 3):
-        image_array = np.dstack((image_array, np.ones((image_array.shape[0], image_array.shape[1], 1), dtype=np.uint8) * alpha))
+        image_array = np.dstack((image_array, np.ones((image_array.shape[0], image_array.shape[1], 1), np.uint8) * alpha))
     return image_array
 
 
 def texture_load_uv(filename_uv):
     with open(filename_uv, 'r') as obj_file:
-        obj_mesh_a = trimesh.exchange.obj.load_obj(obj_file, maintain_order=True)
+        obj_mesh_a = trimesh.exchange.obj.load_obj(file_obj=obj_file, maintain_order=True)
     with open(filename_uv, 'r') as obj_file:
-        obj_mesh_b = trimesh.exchange.obj.load_obj(obj_file)
+        obj_mesh_b = trimesh.exchange.obj.load_obj(file_obj=obj_file)
     mesh_vertices_b = obj_mesh_b['geometry'][filename_uv]['vertices']
     mesh_faces_a = obj_mesh_a['geometry'][filename_uv]['faces']
     mesh_faces_b = obj_mesh_b['geometry'][filename_uv]['faces']
     mesh_uv_b = obj_mesh_b['geometry'][filename_uv]['visual'].uv
-    uv_transform = np.zeros(mesh_vertices_b.shape[0], dtype=np.int64)
+    uv_transform = np.zeros(mesh_vertices_b.shape[0], np.int64)
     for face_index in range(0, mesh_faces_b.shape[0]):
         for vertex_index in range(0, 3):
             uv_transform[mesh_faces_b[face_index, vertex_index]] = mesh_faces_a[face_index, vertex_index]
     return (uv_transform, mesh_faces_b, mesh_uv_b)
+
+
+def texture_create_text(text, font_name, font_size, font_color, bg_color=(0, 0, 0, 0), stroke_width=0):
+    font = ImageFont.truetype(font_name, font_size)
+    bbox = font.getbbox(text, stroke_width=stroke_width)
+    image = Image.new('RGBA', (bbox[2], bbox[3]), bg_color)
+    ImageDraw.Draw(image).text((0, 0), text, font_color, font, stroke_width=stroke_width)
+    return np.array(image.crop(bbox))
+
+
+def texture_create_visual(uv, texture):
+    return trimesh.visual.TextureVisuals(uv=uv, image=Image.fromarray(texture))
 
 
 def texture_uv_to_uvx(uv, image_shape):
@@ -110,8 +127,16 @@ def texture_processor(simplex_uvx, callback, tolerance=0):
 
 
 #------------------------------------------------------------------------------
-# Mesh Neighborhood Processing
+# Mesh Processing
 #------------------------------------------------------------------------------
+
+def mesh_create(vertices, faces, visual=None):
+    return trimesh.Trimesh(vertices=vertices, faces=faces, visual=visual, process=False)
+
+
+def mesh_to_renderer(mesh):
+    return pyrender.Mesh.from_trimesh(mesh)
+
 
 class mesh_neighborhood_builder:
     def __init__(self, mesh):
@@ -240,7 +265,7 @@ class mesh_neighborhood_operation_decal:
             self._pixels_painted += target(self._mesh_vertices, self._face_normal, self._origin, self._vertex_indices_b, self._vertex_indices_a, pixels, weights, self._level)
 
 
-class brush_solid:
+class paint_brush_solid:
     def __init__(self, size, color, render_buffer):
         self._size = size
         self._color = color
@@ -255,7 +280,7 @@ class brush_solid:
         return pixels_painted
 
 
-class brush_gradient:
+class paint_brush_gradient:
     def __init__(self, size, color_center, color_edge, hardness, render_buffer):
         self._size = size
         self._color_center = color_center
@@ -273,7 +298,7 @@ class brush_gradient:
         return pixels_painted
 
 
-class decal_solid:
+class paint_decal_solid:
     def __init__(self, align_prior, angle, scale, image_buffer, render_buffer):
         self._align_prior = align_prior
         self._angle = angle
@@ -349,14 +374,100 @@ class decal_solid:
         return call(mesh_vertices, face_normal, origin, indices_vertices, indices_uvx, pixels_dst, weights_src, level)
 
 
-def painter_create_brush(mesh_a, mesh_b, mesh_uvx, face_index, origin, brushes, tolerance=0):
-    mno = mesh_neighborhood_operation_brush(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_uvx, origin, brushes, tolerance)
+def painter_create_brush(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, origin, brush_collection, tolerance=0):
+    mno = mesh_neighborhood_operation_brush(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_uvx, origin, brush_collection, tolerance)
     mnp = mesh_neighborhood_processor(mesh_a, {face_index}, mno.paint)
     return mnp
 
 
-def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, origin, decals, tolerance=0):
-    mno = mesh_neighborhood_operation_decal(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_b.face_normals, mesh_uvx, uv_transform, origin, decals, tolerance)
+def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, origin, decal_collection, tolerance=0):
+    mno = mesh_neighborhood_operation_decal(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_b.face_normals, mesh_uvx, uv_transform, origin, decal_collection, tolerance)
     mnp = mesh_neighborhood_processor(mesh_a, {face_index}, mno.paint)
     return mnp
+
+
+#------------------------------------------------------------------------------
+# Rendering
+#------------------------------------------------------------------------------
+
+class renderer:
+    def __init__(self, width, height, fx, fy, cx, cy, znear=0.05, zfar=100, point_size=1, bg_color=(1.0, 1.0, 1.0), ambient_light=(0.0, 0.0, 0.0), lamp_color=(1.0, 1.0, 1.0), lamp_intensity=3.0):
+        self._renderer = pyrender.OffscreenRenderer(width, height, point_size)
+        self._scene = pyrender.Scene(None, bg_color, ambient_light, 'main_scene')
+        self._camera = pyrender.IntrinsicsCamera(fx, fy, cx, cy, znear, zfar, 'main_camera')
+        self._light = pyrender.DirectionalLight(lamp_color, lamp_intensity, 'main_camera_lamp')
+        self._groups = dict()
+
+        self._camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]], dtype=np.float32).reshape((4, 4))
+
+        self._node_camera = self._scene.add(self._camera, 'internal@main@camera', self._camera_pose)
+        self._node_light = self._scene.add(self._light, 'internal@main@lamp', self._camera_pose)
+
+    def set_camera_pose(self, camera_pose):
+        self._camera_pose = camera_pose
+
+        self._scene.set_pose(self._node_camera, self._camera_pose)
+        self._scene.set_pose(self._node_light, self._camera_pose)
+
+    def get_camera_pose(self):
+        return self._camera_pose
+
+    def render(self):
+        color, depth = self._renderer.render(self._scene, pyrender.RenderFlags.RGBA)
+        return color, depth
+
+    def group_item_add(self, group, name, item, pose=None):
+        nodes = self._groups.get(group, dict())
+        previous = nodes.get(name, None)
+        if (previous is not None):
+            self._scene.remove_node(previous)
+        if (pose is None):
+            pose = np.eye(4)
+        nodes[name] = self._scene.add(item, 'external@' + group + '@' + name, pose)
+        self._groups[group] = nodes
+
+    def group_item_remove(self, group, name):
+        nodes = self._groups.get(group, None)
+        if (nodes is not None):
+            item = nodes.get(name, None)
+            if (item is not None):
+                self._scene.remove_node(item)
+
+    def group_item_set_pose(self, group, name, pose):
+        nodes = self._groups.get(group, None)
+        if (nodes is not None):
+            item = nodes.get(name, None)
+            if (item is not None):
+                self._scene.set_pose(item, pose)
+
+    def group_item_get_pose(self, group, name):
+        nodes = self._groups.get(group, None)
+        if (nodes is not None):
+            item = nodes.get(name, None)
+            if (item is not None):
+                return self._scene.get_pose(item)
+        return None
+
+    def group_clear(self, group):
+        nodes = self._groups.pop(group, None)
+        if (nodes is not None):
+            for name, item in nodes.items():
+                self._scene.remove_node(item)
+
+
+
+
+
+
+
+
+
+
+def process_input(self, inputs):
+    # TODO: USE KEYBINDS
+    # adjust yaw
+    # adjust pitch
+    # gravity vector?
+    # translate?
+    pass
 
