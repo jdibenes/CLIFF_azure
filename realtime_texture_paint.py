@@ -1,19 +1,12 @@
-import os
+
 import cv2
-import json
 import argparse
 import numpy as np
-from tqdm import tqdm
-import math
 import time
 
 import torch
-from torch.utils.data import DataLoader
 
 from pytorch3d import transforms
-import trimesh.exchange
-import trimesh.exchange.obj
-import trimesh.visual
 
 from models.smpl import SMPL
 from common import constants
@@ -27,17 +20,9 @@ from common.utils import strip_prefix_if_present, cam_crop2full
 
 import mesh_solver
 
-# For 3D visualization
-import pyrender
-import trimesh
-
-import trimesh.transformations as tf
 
 import visualizer
 
-from PIL import Image
-
-from pyrender.constants import TextAlign
 
 # Joint map (for reference)
 JOINT_NAMES = [
@@ -163,10 +148,11 @@ class demo:
         #tex_filename = './data/textures/f_01_alb.002_test.png'
         tex_filename = './data/textures/smpl_uv_20200910.png'
         self._texture_array = mesh_solver.texture_load_image(tex_filename)
-        self._mesh_visuals = trimesh.visual.TextureVisuals(uv=self._mesh_uv_b, image=Image.fromarray(self._texture_array))
-
+        self._mesh_visuals = mesh_solver.texture_create_visual(self._mesh_uv_b, self._texture_array)
         self._mesh_uvx_b = mesh_solver.texture_uv_to_uvx(self._mesh_uv_b.copy(), self._texture_array.shape)
-        self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
+        #self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
+        self._test_stamp = mesh_solver.texture_create_text('HELLO', 'arial.ttf', 512, (255, 0, 0, 255))
+        self._offscreen_renderer = mesh_solver.renderer(1280, 720, 700, 700, 640, 360)
 
         # Initialize visualization utilities
         viewport_width, viewport_height = 1280, 720
@@ -263,7 +249,7 @@ class demo:
         joints = pred_output.joints.cpu().detach().numpy()[0].T
         faces = self._smpl.faces
 
-        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        mesh = mesh_solver.mesh_create(vertices, faces) #trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
         # todo: project mesh into image
         if (self._next_region is not None):
@@ -316,13 +302,14 @@ class demo:
         faces_b = self._mesh_faces_b
 
         start_time = time.perf_counter()
-        mesh2 = trimesh.Trimesh(vertices=vertices_b, faces=faces_b, visual=self._mesh_visuals, process=False)
+        mesh2 = mesh_solver.mesh_create(vertices_b, faces_b, self._mesh_visuals) #trimesh.Trimesh(vertices=vertices_b, faces=faces_b, visual=self._mesh_visuals, process=False)
+
         end_time = time.perf_counter()
         print(f'MESH2 time {end_time-start_time}')
 
         start_time = time.perf_counter()
-        #mob = mesh_solver.brush_gradient(0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, self._texture_array)
-        #mob2 = mesh_solver.brush_solid(0.02, np.array([255, 0, 0, 255], dtype=np.uint8), self._texture_array)
+        #mob = mesh_solver.paint_brush_gradient(0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, self._texture_array)
+        #mob2 = mesh_solver.paint_brush_solid(0.02, np.array([255, 0, 0, 255], dtype=np.uint8), self._texture_array)
         #mno = mesh_solver.painter_create_brush(mesh, mesh2, self._mesh_uvx_b, face_index, point.T, [mob2.paint, mob.paint])
         #mno.invoke_timeslice(0.010)
         end_time = time.perf_counter()
@@ -334,19 +321,30 @@ class demo:
         align_prior = align_prior / np.linalg.norm(align_prior)
 
         start_time = time.perf_counter()
-        mob = mesh_solver.decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._texture_array)
+        mob = mesh_solver.paint_decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._texture_array)
         mno = mesh_solver.painter_create_decal(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, [mob.paint])
         mno.invoke_timeslice(0.010)
         end_time = time.perf_counter()
         print(f'paint image time {end_time-start_time} proc')
         
-        mesh2.visual.material.image.frombytes(self._texture_array.tobytes())
+        #mesh2.visual.material.image.frombytes(self._texture_array.tobytes())
 
         self._scene_control.set_smpl_mesh(mesh2)
         self._scene_control.clear_group('arrows')
 
         camera_pose[:3, 3:4] = (focus_center + 1.2 * axis_displacement * camera_pose[:3, 2:3])
         self._scene_control.set_camera_pose(camera_pose)
+
+        self._offscreen_renderer.group_item_add('smpl_meshes', 'mesh_test', mesh_solver.mesh_to_renderer(mesh2))
+        self._offscreen_renderer.set_camera_pose(camera_pose)
+        
+        #mesh2.visual.material.image.frombytes(self._texture_array.tobytes())
+        color, _ = self._offscreen_renderer.render()
+
+        cv2.imshow('offscreen test', color)
+        cv2.imshow('text', self._test_stamp)
+        cv2.waitKey(0)
+
 
         if (update_region):
             viewer.set_camera_target(camera_pose, focus_axis, focus_center)
@@ -362,21 +360,6 @@ def main():
 if __name__ == '__main__':
     main()
 
-
-
-#def load_texture(filename, uv):
-#    texture_image = Image.open(filename)
-#    mesh_visuals = trimesh.visual.TextureVisuals(uv=uv, image=texture_image)
-#    texture_array = np.array(texture_image)
-#    overlay_array = np.zeros_like(texture_array)
-#    return (mesh_visuals, texture_array, overlay_array)
-
-
-#print(mesh_visuals.material.image)
-        #pxmap = mesh_visuals.material.image.load()
-        #for i in range(0, 512):
-        #    for j in range(0, 512):
-        #        pxmap[i, j] = (255, 0, 0, 255)
 
 '''
 def create_colormap():
