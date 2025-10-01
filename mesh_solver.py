@@ -47,7 +47,7 @@ def texture_load_uv(filename_uv):
     return (uv_transform, mesh_faces_b, mesh_uv_b)
 
 
-def texture_create_text(text_list, font_name, font_size, font_color, bg_color=(0, 0, 0, 0), stroke_width=0, spacing=4, pad_factor=(0.0, 0.0)):
+def texture_create_text(text_list, font_name, font_size, font_color, bg_color=(255, 255, 255, 255), stroke_width=0, spacing=4, pad_factor=(0.0, 0.0)):
     font = ImageFont.truetype(font_name, font_size)
     arrays = []
     for text in text_list:
@@ -258,14 +258,14 @@ class mesh_neighborhood_operation_brush:
 
 
 class mesh_neighborhood_operation_decal:
-    def __init__(self, mesh_vertices, mesh_faces, mesh_face_normals, mesh_uvx, uv_transform, origin, targets, tolerance=0):
+    def __init__(self, mesh_vertices, mesh_faces, mesh_face_normals, mesh_uvx, uv_transform, origin, target, tolerance=0):
         self._mesh_vertices = mesh_vertices
         self._mesh_faces = mesh_faces
         self._mesh_face_normals = mesh_face_normals
         self._mesh_uvx = mesh_uvx
         self._uv_transform = uv_transform
         self._origin = origin
-        self._targets = targets
+        self._target = target
         self._tolerance = tolerance
 
     def paint(self, face_index, level):
@@ -273,16 +273,14 @@ class mesh_neighborhood_operation_decal:
         self._vertex_indices_b = self._mesh_faces[face_index]
         self._vertex_indices_a = self._uv_transform[self._vertex_indices_b]
         self._level = level
-        ready = [target(self._mesh_vertices, self._face_normal, self._origin, self._vertex_indices_b, self._vertex_indices_a, None, None, self._level) for target in self._targets]
-        if (not np.all(ready)):
-            return mesh_neighborhood_processor_command.CONTINUE
+        command = self._target(self._mesh_vertices, self._face_normal, self._origin, self._vertex_indices_b, self._vertex_indices_a, None, None, self._level)
+        if (command != mesh_neighborhood_processor_command.EXPAND):
+            return command
         texture_processor(self._mesh_uvx[self._vertex_indices_b, :], self._paint_uv, self._tolerance)
         return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
 
     def _paint_uv(self, pixels, weights):
-        self._pixels_painted = 0
-        for target in self._targets:
-            self._pixels_painted += target(self._mesh_vertices, self._face_normal, self._origin, self._vertex_indices_b, self._vertex_indices_a, pixels, weights, self._level)
+        self._pixels_painted = self._target(self._mesh_vertices, self._face_normal, self._origin, self._vertex_indices_b, self._vertex_indices_a, pixels, weights, self._level)
 
 
 class paint_brush_solid:
@@ -319,23 +317,41 @@ class paint_brush_gradient:
 
 
 class paint_decal_solid:
-    def __init__(self, align_prior, angle, scale, image_buffer, render_buffer):
+    def __init__(self, align_prior, angle, scale, image_buffer, render_buffer, tolerance=0):
         self._align_prior = align_prior
         self._angle = angle
         self._scale = scale
         self._image_buffer = image_buffer
         self._render_buffer = render_buffer
+        self._tolerance = tolerance
+        self._simplices = []
+        self._simplices_map = []
+
+    def _push_simplex(self, simplex):
+        self._simplices.append(simplex)
+        self._simplices_map.append(None)
+
+    def _test_simplex(self, point, i, tolerance=0):
+        simplex = self._simplices[i]
+        simplex_map = self._simplices_map[i]
+        anchor = simplex[2:3, :]
+        if (simplex_map is None):
+            simplex_map = np.linalg.inv(simplex[0:2, :] - anchor)
+            self._simplices_map[i] = simplex_map
+        ab = (point - anchor) @ simplex_map
+        abc = np.hstack((ab, 1 - ab[:, 0:1] - ab[:, 1:2]))
+        return np.all(abc > -tolerance)
 
     def _bootstrap(self, mesh_vertices, face_normal, origin, indices_vertices, indices_uvx, pixels_dst, weights_src, level):
-        self._align_axis = np.array([[0, 1, 0]], dtype=face_normal.dtype)
-        self._uvx_normal = np.array([[0, 0, 1]], dtype=face_normal.dtype)
+        self._align_axis = np.array([[0, 1, 0]], face_normal.dtype)
+        self._uvx_normal = np.array([[0, 0, 1]], face_normal.dtype)
 
         self._image_uvx = np.ones_like(mesh_vertices)
 
         vps = origin
         vxs = mesh_vertices[indices_vertices, :]
 
-        vpd = np.array([[self._image_buffer.shape[1] // 2, self._image_buffer.shape[0] // 2, 0]], dtype=mesh_vertices.dtype)
+        vpd = np.array([[self._image_buffer.shape[1] // 2, self._image_buffer.shape[0] // 2, 0]], mesh_vertices.dtype)
 
         align_outward = geometry_align_basis(self._align_prior, face_normal, self._align_axis * self._scale, self._uvx_normal)
         align_simplex = cv2.Rodrigues(self._uvx_normal * self._angle)[0].T
@@ -344,8 +360,9 @@ class paint_decal_solid:
         vxd[:, 2] = 0
 
         self._image_uvx[indices_uvx, :] = vxd
+        self._push_simplex(vxd[:, 0:2])
 
-        return True
+        return mesh_neighborhood_processor_command.EXPAND
 
     def _unwrap(self, mesh_vertices, face_normal, origin, indices_vertices, indices_uvx, pixels_dst, weights_src, level):
         # TODO: THIS UNWRAPPING METHOD IS AFFECTED BY THE ORDER IN WHICH FACES ARE PROCESSED
@@ -353,10 +370,10 @@ class paint_decal_solid:
         unwrapped_count = unwrapped.sum()
 
         if (unwrapped_count <= 1):
-            return False
+            return mesh_neighborhood_processor_command.CONTINUE
         
         if (unwrapped_count >= 3):
-            return True
+            return mesh_neighborhood_processor_command.EXPAND
 
         unwrapped_indices = [1, 2, 0] if (not unwrapped[0]) else [2, 0, 1] if (not unwrapped[1]) else [0, 1, 2]
 
@@ -375,9 +392,15 @@ class paint_decal_solid:
         vxd = ((vxs - vps) @ align_outward) + vpd
         vxd[:, 2] = 0
 
-        self._image_uvx[vixs_a:(vixs_a + 1), :] = vxd
+        for i in range(0, len(self._simplices)):
+            double_cover = self._test_simplex(vxd[:, 0:2], len(self._simplices) - 1 - i, self._tolerance)
+            if (double_cover):
+                return mesh_neighborhood_processor_command.IGNORE
 
-        return True
+        self._image_uvx[vixs_a:(vixs_a + 1), :] = vxd
+        self._push_simplex(np.vstack((vxd[:, 0:2], vqd[:, 0:2], vpd[:, 0:2])))
+
+        return mesh_neighborhood_processor_command.EXPAND
 
     def _blit(self, mesh_vertices, face_normal, origin, indices_vertices, indices_uvx, pixels_dst, weights_src, level):
         pixels_src = texture_uvx_invert(weights_src @ self._image_uvx[indices_uvx, 0:2], self._image_buffer.shape, 1)
@@ -418,7 +441,7 @@ class renderer:
         self._light = pyrender.DirectionalLight(lamp_color, lamp_intensity, 'main_camera_lamp')
         self._groups = dict()
 
-        self._camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]], dtype=np.float32).reshape((4, 4))
+        self._camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]], np.float32).reshape((4, 4))
 
         self._node_camera = self._scene.add(self._camera, 'internal@main@camera', self._camera_pose)
         self._node_light = self._scene.add(self._light, 'internal@main@lamp', self._camera_pose)
@@ -491,3 +514,9 @@ def process_input(self, inputs):
     # translate?
     pass
 
+        #split_normal = np.cross(v1d / vds, self._uvx_normal)
+        #split_distance = split_normal @ vpd.T
+
+        #o = split_normal @ vxd.T - split_distance
+        #if (o > 0):
+        #    print('IN?')
