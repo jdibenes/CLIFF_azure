@@ -9,6 +9,17 @@ import collections
 from pyglet import clock
 
 
+class camera_null:
+    def open(self, resolution=(640, 480)):
+        self._shape = (resolution[1], resolution[0], 3)
+
+    def read(self):
+        return { 'color' : np.zeros(self._shape, np.uint8) }
+    
+    def close(self):
+        pass
+
+
 class camera_opencv:
     def open(self, id=0, resolution=(640, 480), framerate=30):
         self._cap = cv2.VideoCapture(id)
