@@ -131,7 +131,8 @@ def mesh_raycast(mesh, origin, direction):
 class demo:
     def run(self, args):
         # Set up the webcam and offscreen pyrender renderer.
-        cap = visualizer.camera_opencv()
+        #cap = visualizer.camera_opencv()
+        cap = visualizer.camera_null()
         cap.open()
 
         # Model stuff
@@ -151,7 +152,7 @@ class demo:
         self._mesh_visuals = mesh_solver.texture_create_visual(self._mesh_uv_b, self._texture_array)
         self._mesh_uvx_b = mesh_solver.texture_uv_to_uvx(self._mesh_uv_b.copy(), self._texture_array.shape)
         #self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
-        self._test_stamp = mesh_solver.texture_create_text(['Cut', 'Here'], 'arial.ttf', 512, (255, 0, 0, 255), stroke_width=10, spacing=20, pad_factor=(0.05, 0.1), )
+        self._test_stamp = mesh_solver.texture_create_text(['Cut', 'Here'], 'arial.ttf', 512, (255, 0, 0, 255), stroke_width=1, spacing=20, pad_factor=(0.05, 0.1))
         self._offscreen_renderer = mesh_solver.renderer(1280, 720, 700, 700, 640, 360)
 
         # Initialize visualization utilities
@@ -324,6 +325,7 @@ class demo:
         mob = mesh_solver.paint_decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._texture_array)
         mno = mesh_solver.painter_create_decal(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, [mob.paint])
         mno.invoke_timeslice(0.010)
+        #mno.invoke_timeslice(0.100)
         end_time = time.perf_counter()
         print(f'paint image time {end_time-start_time} proc')
         
@@ -342,7 +344,6 @@ class demo:
         color, _ = self._offscreen_renderer.render()
 
         #cv2.imshow('offscreen test', color)
-        #cv2.imshow('text', self._test_stamp)
         #cv2.waitKey(0)
 
 
