@@ -256,8 +256,8 @@ class demo:
 
         start_time = time.perf_counter()
         #mob = mesh_solver.paint_brush_gradient(0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, self._texture_array)
-        #mob2 = mesh_solver.paint_brush_solid(0.02, np.array([255, 0, 0, 255], dtype=np.uint8), self._texture_array)
-        #mno = mesh_solver.painter_create_brush(mesh, mesh2, self._mesh_uvx_b, face_index, point.T, [mob2.paint, mob.paint])
+        #mob2 = mesh_solver.paint_brush_solid(0.02, np.array([0, 255, 0, 255], dtype=np.uint8), self._texture_array)
+        #mno = mesh_solver.painter_create_brush(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, [mob2.paint, mob.paint])
         #mno.invoke_timeslice(0.010)
         end_time = time.perf_counter()
         print(f'paint solid time {end_time-start_time} proc')
@@ -271,7 +271,6 @@ class demo:
         mob = mesh_solver.paint_decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._texture_array)
         mno = mesh_solver.painter_create_decal(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, [mob.paint])
         mno.invoke_timeslice(0.010)
-        #mno.invoke_timeslice(0.100)
         end_time = time.perf_counter()
         print(f'paint image time {end_time-start_time} proc')
         
