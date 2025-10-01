@@ -95,6 +95,7 @@ class demo:
         #tex_filename = './data/textures/f_01_alb.002_test.png'
         tex_filename = './data/textures/smpl_uv_20200910.png'
         self._texture_array = mesh_solver.texture_load_image(tex_filename)
+        self._bg_array = self._texture_array.copy()
         self._mesh_visuals = mesh_solver.texture_create_visual(self._mesh_uv_b, self._texture_array)
         self._mesh_uvx_b = mesh_solver.texture_uv_to_uvx(self._mesh_uv_b.copy(), self._texture_array.shape)
         #self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
@@ -252,7 +253,7 @@ class demo:
         mesh2 = mesh_solver.mesh_create(vertices_b, faces_b, self._mesh_visuals) #trimesh.Trimesh(vertices=vertices_b, faces=faces_b, visual=self._mesh_visuals, process=False)
 
         end_time = time.perf_counter()
-        print(f'MESH2 time {end_time-start_time}')
+        #print(f'MESH2 time {end_time-start_time}')
 
         start_time = time.perf_counter()
         #mob = mesh_solver.paint_brush_gradient(0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, self._texture_array)
@@ -260,19 +261,24 @@ class demo:
         #mno = mesh_solver.painter_create_brush(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, [mob2.paint, mob.paint])
         #mno.invoke_timeslice(0.010)
         end_time = time.perf_counter()
-        print(f'paint solid time {end_time-start_time} proc')
+        #print(f'paint solid time {end_time-start_time} proc')
 
         align_prior = np.array([[0, 1, 0]], dtype=np.float32)
         align_normal = mesh.face_normals[face_index:(face_index+1), :]
+        #print(align_prior @ align_normal.T)
         align_prior = align_prior - (align_normal @ align_prior.T) * align_normal
         align_prior = align_prior / np.linalg.norm(align_prior)
 
         start_time = time.perf_counter()
-        mob = mesh_solver.paint_decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._texture_array)
-        mno = mesh_solver.painter_create_decal(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, [mob.paint])
-        mno.invoke_timeslice(0.010)
+        self._overlay_array = np.zeros_like(self._texture_array)
+        mob = mesh_solver.paint_decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._overlay_array)
+        mno = mesh_solver.painter_create_decal(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, mob.paint)
+        mno.invoke_timeslice(0.020)
         end_time = time.perf_counter()
         print(f'paint image time {end_time-start_time} proc')
+
+        alpha = self._overlay_array[:, :, 3:4] / 255
+        self._texture_array[:, :, :] = (1-alpha) * self._bg_array + alpha * self._overlay_array
         
         #mesh2.visual.material.image.frombytes(self._texture_array.tobytes())
 
