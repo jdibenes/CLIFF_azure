@@ -92,8 +92,8 @@ class demo:
         frame = frame_data['color']        
         self._device, self._cliff_model, self._bbox_info, self._smpl = create_model(frame.shape)
         self._uv_transform, self._mesh_faces_b, self._mesh_uv_b = mesh_solver.texture_load_uv('./data/smpl_uv.obj')
-        #tex_filename = './data/textures/f_01_alb.002_test.png'
-        tex_filename = './data/textures/smpl_uv_20200910.png'
+        tex_filename = './data/textures/f_01_alb.002_1k.png'
+        #tex_filename = './data/textures/smpl_uv_20200910.png'
         self._texture_array = mesh_solver.texture_load_image(tex_filename)
         self._bg_array = self._texture_array.copy()
         self._mesh_visuals = mesh_solver.texture_create_visual(self._mesh_uv_b, self._texture_array)
@@ -101,15 +101,14 @@ class demo:
         #self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
         self._test_stamp = mesh_solver.texture_create_text(['Cut', 'Here'], 'arial.ttf', 512, (255, 0, 0, 255), stroke_width=1, spacing=20, pad_factor=(0.05, 0.1))
         
-        #self._offscreen_renderer = mesh_solver.renderer(1280, 720, 700, 700, 640, 360)
         cfg_offscreen = mesh_solver.renderer_create_settings_offscreen(1280, 720)
         cfg_scene = mesh_solver.renderer_create_settings_scene()
-        cfg_camera = mesh_solver.renderer_create_settings_camera(700, 700, 640, 360)
+        #f = 700
+        f = 1/(np.tan((np.pi / 3) / 2) / (720 / 2))
+        cfg_camera = mesh_solver.renderer_create_settings_camera(f, f, 640, 360)
         cfg_camera_transform = mesh_solver.renderer_create_settings_camera_transform()
-        cfg_lamp = mesh_solver.renderer_create_settings_lamp()
+        cfg_lamp = mesh_solver.renderer_create_settings_lamp(intensity=2.0)
         self._offscreen_renderer = mesh_solver.renderer(cfg_offscreen, cfg_scene, cfg_camera, cfg_camera_transform, cfg_lamp)
-
-
 
         # Initialize visualization utilities
         viewport_width, viewport_height = 1280, 720
@@ -297,8 +296,9 @@ class demo:
 
         self._offscreen_renderer.group_item_add('smpl_meshes', 'mesh_test', mesh_solver.mesh_to_renderer(mesh2))
         # TODO: full SO(3) to zero roll transform:
-        #self._offscreen_renderer.set_camera_pose(camera_pose)
-        use_offscreen = True
+        self._offscreen_renderer._camera_set_pose(camera_pose)
+        #use_offscreen = True
+        use_offscreen = False
 
         while (use_offscreen):
             color, _ = self._offscreen_renderer.render()
