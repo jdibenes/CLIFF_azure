@@ -539,11 +539,6 @@ class renderer_camera_transform:
     def update_center(self, delta):
         self.set_center(self._center + delta)
 
-
-
-
-
-
     def get_matrix_center(self):
         return self._tc
 
@@ -555,29 +550,12 @@ class renderer_camera_transform:
     
     def get_matrix_distance(self):
         return self._tz
-    
-
-
-
-
-
-
-
-
 
     def transform(self):
         if (self._dirty):
             self._pose = self._tc @ self._ry @ self._rx @ self._tz
             self._dirty = False
-            print(self._pose)
         return self._pose
-
-
-
-
-
-
-
 
 
 class renderer:
@@ -665,23 +643,6 @@ class renderer:
 
 
 
-
-
-    
-
-    
-
-    
-
-    
-
-
-
-
-
-
-
-
 def process_input(self, inputs):
     # TODO: USE KEYBINDS
     # adjust yaw
@@ -690,56 +651,3 @@ def process_input(self, inputs):
     # translate?
     pass
 
-
-
-'''
-# deprecated
-class scene_manager:
-    def __init__(self, camera_yfov):
-        self._scene  = pyrender.Scene()
-        self._camera = pyrender.PerspectiveCamera(yfov=camera_yfov)
-        self._light  = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
-        
-        self._camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]], dtype=np.float32).reshape((4, 4))
-        
-        self._node_camera = self._scene.add(self._camera, pose=self._camera_pose)
-        self._node_light  = self._scene.add(self._light,  pose=self._camera_pose)
-        self._node_mesh   = None
-        self._node_groups = {}
-
-    def set_smpl_mesh(self, mesh):
-        self._mesh = mesh
-        self.reload_mesh()
-
-    def get_mesh_colors(self):
-        return self._mesh.visual.vertex_colors
-    
-    def set_mesh_colors(self, colors):
-        self._mesh.visual.vertex_colors = colors
-
-    def reload_mesh(self):
-        if (self._node_mesh is not None):
-            self._scene.remove_node(self._node_mesh)
-            self._node_mesh = None
-        self._node_mesh = self._scene.add(pyrender.Mesh.from_trimesh(self._mesh))
-
-    def get_camera_pose(self):
-        return self._camera_pose
-    
-    def set_camera_pose(self, camera_pose):
-        self._camera_pose = camera_pose
-
-        self._scene.set_pose(self._node_camera, self._camera_pose)
-        self._scene.set_pose(self._node_light,  self._camera_pose)
-
-    def clear_group(self, group):
-        nodes = self._node_groups.get(group, [])
-        for node in nodes:
-            self._scene.remove_node(node)
-        self._node_groups[group] = []
-
-    def add(self, group, object):
-        nodes = self._node_groups.get(group, [])
-        nodes.append(self._scene.add(object))
-        self._node_groups[group] = nodes
-'''
