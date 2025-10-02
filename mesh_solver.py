@@ -657,20 +657,3 @@ class renderer:
         tz = self._camera_transform.get_matrix_distance()
         return (yaw, pitch, distance, center, tc, ry, rx, tz)
 
-
-    
-
-
-
-
-
-
-
-def process_input(self, inputs):
-    # TODO: USE KEYBINDS
-    # adjust yaw
-    # adjust pitch
-    # gravity vector?
-    # translate?
-    pass
-
