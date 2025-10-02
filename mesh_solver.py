@@ -15,19 +15,27 @@ from PIL import Image, ImageFont, ImageDraw
 #------------------------------------------------------------------------------
 
 def geometry_align_basis(vas, vbs, vad, vbd):
+    # TODO: error for singular matrix
     return np.linalg.inv(np.vstack((vas, vbs, np.cross(vas, vbs)))) @ np.vstack((vad, vbd, np.cross(vad, vbd)))
+
+
+#------------------------------------------------------------------------------
+# Image Processing
+#------------------------------------------------------------------------------
+
+def font_load(font_name, font_size):
+    return ImageFont.truetype(font_name, font_size)
 
 
 #------------------------------------------------------------------------------
 # Texture Processing
 #------------------------------------------------------------------------------
 
-def texture_load_image(filename_image, alpha=255):
-    image_array = cv2.cvtColor(cv2.imread(filename_image, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
-    channels = image_array.shape[2]
-    if (channels == 3):
-        image_array = np.dstack((image_array, np.ones((image_array.shape[0], image_array.shape[1], 1), np.uint8) * alpha))
-    return image_array
+def texture_load_image(filename_image, load_alpha=True, alpha=255):
+    rgb = cv2.imread(filename_image, cv2.IMREAD_COLOR_RGB)
+    raw = cv2.imread(filename_image, cv2.IMREAD_UNCHANGED)
+    a = raw[:, :, 3] if ((load_alpha) and (raw.shape[2] == 4)) else (np.ones((rgb.shape[0], rgb.shape[1], 1), rgb.dtype) * alpha)
+    return np.dstack((rgb, a))
 
 
 def texture_load_uv(filename_uv):
@@ -46,32 +54,33 @@ def texture_load_uv(filename_uv):
     return (uv_transform, mesh_faces_b, mesh_uv_b)
 
 
-def texture_create_text(text_list, font_name, font_size, font_color, bg_color=(255, 255, 255, 255), stroke_width=0, spacing=4, pad_factor=(0.0, 0.0)):
-    font = ImageFont.truetype(font_name, font_size)
-    arrays = []
-    for text in text_list:
-        bbox = font.getbbox(text, stroke_width=stroke_width)
-        image = Image.new('RGBA', (bbox[2], bbox[3]), bg_color)
-        ImageDraw.Draw(image).text((0, 0), text, font_color, font, stroke_width=stroke_width)
-        arrays.append(np.array(image.crop(bbox)))
-    image_count = len(arrays)
-    if (image_count > 1):
-        full_w = np.max([array.shape[1] for array in arrays])
-        padded_arrays = []
-        for i, array in enumerate(arrays):
-            w = array.shape[1]
-            count = full_w - w
-            pad_l = count // 2
-            pad_r = count - pad_l
-            padded_arrays.append(cv2.copyMakeBorder(array, 0 if (i == 0) else spacing, 0, pad_l, pad_r, cv2.BORDER_CONSTANT, value=bg_color))
-        composite = np.vstack(padded_arrays)
-    else:
-        composite = arrays[0]
-    h, w = composite.shape[0:2]
-    pad_x = math.ceil(w * pad_factor[0])
-    pad_y = math.ceil(h * pad_factor[1])
-    composite = cv2.copyMakeBorder(composite, pad_y, pad_y, pad_x, pad_x, cv2.BORDER_CONSTANT, value=bg_color)
-    return composite
+def texture_stack(textures, fill_color, spacing, vertical):
+    axis_a, axis_b = (0, 1) if (vertical) else (1, 0)
+    pad = np.zeros((len(textures), 4), np.int32)
+    d = np.array([texture.shape[axis_b] for texture in textures], np.int32)
+    fill_d = np.max(d) - d
+    pad[0:, 2 * axis_b + 0] = fill_d // 2
+    pad[0:, 2 * axis_b + 1] = fill_d - pad[:, 2 * axis_b + 0]
+    pad[1:, 2 * axis_a + 0] = spacing
+    return np.concatenate([cv2.copyMakeBorder(texture, pad[i, 0], pad[i, 1], pad[i, 2], pad[i, 3], cv2.BORDER_CONSTANT, value=fill_color) for i, texture in enumerate(textures)], axis_a)
+
+
+def texture_pad(texture, pad_w, pad_h, fill_color):
+    h, w = texture.shape[0:2]
+    pad_x = math.ceil(w * pad_w)
+    pad_y = math.ceil(h * pad_h)
+    return cv2.copyMakeBorder(texture, pad_y, pad_y, pad_x, pad_x, cv2.BORDER_CONSTANT, value=fill_color)
+
+
+def texture_create_text(text, font, font_color, bg_color=(255, 255, 255, 255), stroke_width=0):
+    bbox = font.getbbox(text, stroke_width=stroke_width)
+    image = Image.new('RGBA', (bbox[2], bbox[3]), bg_color)
+    ImageDraw.Draw(image).text((0, 0), text, font_color, font, stroke_width=stroke_width)
+    return np.array(image.crop(bbox))
+
+
+def texture_create_multiline_text(text_list, font, font_color, bg_color=(255, 255, 255, 255), stroke_width=0, spacing=4):
+    return texture_stack([texture_create_text(text, font, font_color, bg_color, stroke_width) for text in text_list], bg_color, spacing, True)
 
 
 def texture_create_visual(uv, texture):
@@ -113,8 +122,8 @@ def texture_read(texture, x, y):
 
 
 def texture_alpha_blend(texture_1a, texture_a, alpha):
-    # linear space
-    return np.sqrt((1 - alpha) * np.square(texture_1a / 255) + alpha * np.square(texture_a / 255)) * 255
+    # sqrt space
+    return (1 - alpha) * texture_1a + alpha * texture_a
 
 
 def texture_alpha_remap(alpha, src, dst):
