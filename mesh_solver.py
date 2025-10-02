@@ -4,7 +4,6 @@ import math
 import numpy as np
 import cv2
 import pyrender
-
 import trimesh.visual
 import trimesh.exchange.obj
 
@@ -331,7 +330,7 @@ class paint_decal_solid:
         self._simplices.append(simplex)
         self._simplices_map.append(None)
 
-    def _test_simplex(self, point, i, tolerance=0):
+    def _test_simplex(self, point, i):
         simplex = self._simplices[i]
         simplex_map = self._simplices_map[i]
         anchor = simplex[2:3, :]
@@ -340,7 +339,7 @@ class paint_decal_solid:
             self._simplices_map[i] = simplex_map
         ab = (point - anchor) @ simplex_map
         abc = np.hstack((ab, 1 - ab[:, 0:1] - ab[:, 1:2]))
-        return np.all(abc > -tolerance)
+        return np.all(abc > -self._tolerance)
 
     def _bootstrap(self, mesh_vertices, face_normal, origin, indices_vertices, indices_uvx, pixels_dst, weights_src, level):
         self._align_axis = np.array([[0, 1, 0]], face_normal.dtype)
@@ -393,7 +392,7 @@ class paint_decal_solid:
         vxd[:, 2] = 0
 
         for i in range(0, len(self._simplices)):
-            double_cover = self._test_simplex(vxd[:, 0:2], len(self._simplices) - 1 - i, self._tolerance)
+            double_cover = self._test_simplex(vxd[:, 0:2], len(self._simplices) - 1 - i)
             if (double_cover):
                 return mesh_neighborhood_processor_command.IGNORE
 
@@ -433,20 +432,169 @@ def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, ori
 # Rendering
 #------------------------------------------------------------------------------
 
+def renderer_create_settings_offscreen(width, height, point_size=1):
+    s = dict()
+    s['viewport_width'] = width
+    s['viewport_height'] = height
+    s['point_size'] = point_size
+    return s
+
+
+def renderer_create_settings_scene(bg_color=(1.0, 1.0, 1.0, 1.0), ambient_light=(0.0, 0.0, 0.0), name='scene'):
+    s = dict()
+    s['bg_color'] = bg_color
+    s['ambient_light'] = ambient_light
+    s['name'] = name
+    return s
+
+
+def renderer_create_settings_camera(fx, fy, cx, cy, znear=0.05, zfar=100, name='camera'):
+    s = dict()
+    s['fx'] = fx
+    s['fy'] = fy
+    s['cx'] = cx
+    s['cy'] = cy
+    s['znear'] = znear
+    s['zfar'] = zfar
+    s['name'] = name
+    return s
+
+
+def renderer_create_settings_lamp(color=(1.0, 1.0, 1.0), intensity=3.0, name='lamp'):
+    s = dict()
+    s['color'] = color
+    s['intensity'] = intensity
+    s['name'] = name
+    return s
+
+
+def renderer_create_settings_camera_transform(center=np.array([0, 0, 0], np.float32), yaw=0, pitch=0, distance=1, min_pitch=-75, max_pitch=75, znear=0.05, zfar=100):
+    s = dict()
+    s['center'] = center
+    s['yaw'] = yaw
+    s['pitch'] = pitch
+    s['distance'] = distance
+    s['min_pitch'] = min_pitch
+    s['max_pitch'] = max_pitch
+    s['znear'] = znear
+    s['zfar'] = zfar
+    return s
+
+
+class renderer_camera_transform:
+    def __init__(self, center, yaw, pitch, distance, min_pitch, max_pitch, znear, zfar):
+        self._min_pitch = min_pitch
+        self._max_pitch = max_pitch
+        self._znear = znear
+        self._zfar = zfar
+        self._tz = np.eye(4, dtype=center.dtype)
+        self._tc = np.eye(4, dtype=center.dtype)
+
+        self.set_center(center)
+        self.set_yaw(yaw)
+        self.set_pitch(pitch)
+        self.set_distance(distance)
+
+    def get_yaw(self):
+        return self._yaw
+
+    def set_yaw(self, value):
+        self._yaw = value
+        self._ry = trimesh.transformations.rotation_matrix(np.radians(self._yaw), [0, 1, 0])
+        self._dirty = True
+
+    def update_yaw(self, delta):
+        self.set_yaw(self._yaw + delta)
+
+    def get_pitch(self):
+        return self._pitch
+
+    def set_pitch(self, value):
+        self._pitch = np.clip(value, self._min_pitch, self._max_pitch)
+        self._rx = trimesh.transformations.rotation_matrix(np.radians(self._pitch), [1, 0, 0])
+        self._dirty = True
+
+    def update_pitch(self, delta):
+        self.set_pitch(self._pitch + delta)
+
+    def get_distance(self):
+        return self._distance
+
+    def set_distance(self, value):
+        self._distance = np.clip(value, self._znear, self._zfar)
+        self._tz[2, 3] = self._distance
+        self._dirty = True
+
+    def update_distance(self, delta):
+        self.set_distance(self._distance + delta)
+
+    def get_center(self):
+        return self._center
+    
+    def set_center(self, value):
+        self._center = value
+        self._tc[:3, 3] = self._center
+        self._dirty = True
+
+    def update_center(self, delta):
+        self.set_center(self._center + delta)
+
+
+
+
+
+
+    def get_matrix_center(self):
+        return self._tc
+
+    def get_matrix_yaw(self):
+        return self._ry
+    
+    def get_matrix_pitch(self):
+        return self._rx
+    
+    def get_matrix_distance(self):
+        return self._tz
+    
+
+
+
+
+
+
+
+
+
+    def transform(self):
+        if (self._dirty):
+            self._pose = self._tc @ self._ry @ self._rx @ self._tz
+            self._dirty = False
+            print(self._pose)
+        return self._pose
+
+
+
+
+
+
+
+
+
 class renderer:
-    def __init__(self, width, height, fx, fy, cx, cy, znear=0.05, zfar=100, point_size=1, bg_color=(1.0, 1.0, 1.0), ambient_light=(0.0, 0.0, 0.0), lamp_color=(1.0, 1.0, 1.0), lamp_intensity=3.0):
-        self._renderer = pyrender.OffscreenRenderer(width, height, point_size)
-        self._scene = pyrender.Scene(None, bg_color, ambient_light, 'main_scene')
-        self._camera = pyrender.IntrinsicsCamera(fx, fy, cx, cy, znear, zfar, 'main_camera')
-        self._light = pyrender.DirectionalLight(lamp_color, lamp_intensity, 'main_camera_lamp')
+    def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
+        self._renderer = pyrender.OffscreenRenderer(**settings_offscreen)
+        self._scene = pyrender.Scene(**settings_scene)
+        self._camera = pyrender.IntrinsicsCamera(**settings_camera)
+        self._camera_transform = renderer_camera_transform(**settings_camera_transform)
+        self._light = pyrender.DirectionalLight(**settings_lamp)
         self._groups = dict()
 
-        self._camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]], np.float32).reshape((4, 4))
+        self._camera_pose = self._camera_transform.transform()
 
         self._node_camera = self._scene.add(self._camera, 'internal@main@camera', self._camera_pose)
         self._node_light = self._scene.add(self._light, 'internal@main@lamp', self._camera_pose)
 
-    def set_camera_pose(self, camera_pose):
+    def _set_camera_pose(self, camera_pose):
         self._camera_pose = camera_pose
 
         self._scene.set_pose(self._node_camera, self._camera_pose)
@@ -497,19 +645,35 @@ class renderer:
             for name, item in nodes.items():
                 self._scene.remove_node(item)
 
+    def adjust_yaw(self, angle):
+        self._camera_transform.update_yaw(angle)
+        self._set_camera_pose(self._camera_transform.transform())
+
+    def adjust_pitch(self, angle):
+        self._camera_transform.update_pitch(angle)
+        self._set_camera_pose(self._camera_transform.transform())
+
+    def adjust_distance(self, delta):
+        self._camera_transform.update_distance(delta)
+        self._set_camera_pose(self._camera_transform.transform())
+
+    def adjust_position(self, delta):
+        self._camera_transform.update_center(delta)
+        self._set_camera_pose(self._camera_transform.transform())
 
 
-    def rotate_yaw(self, angle):
-        p = self.get_camera_pose()
-        r = trimesh.transformations.rotation_matrix(np.radians(angle), [0, 1, 0])        
-        self.set_camera_pose(r@p)
 
-    def rotate_pitch(self, angle):
-        p = self.get_camera_pose()
-        axis = p[:, 0]
-        r = trimesh.transformations.rotation_matrix(np.radians(angle), axis)
-        self.set_camera_pose(r@p)
 
+
+
+
+    
+
+    
+
+    
+
+    
 
 
 
@@ -526,9 +690,56 @@ def process_input(self, inputs):
     # translate?
     pass
 
-        #split_normal = np.cross(v1d / vds, self._uvx_normal)
-        #split_distance = split_normal @ vpd.T
 
-        #o = split_normal @ vxd.T - split_distance
-        #if (o > 0):
-        #    print('IN?')
+
+'''
+# deprecated
+class scene_manager:
+    def __init__(self, camera_yfov):
+        self._scene  = pyrender.Scene()
+        self._camera = pyrender.PerspectiveCamera(yfov=camera_yfov)
+        self._light  = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
+        
+        self._camera_pose = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]], dtype=np.float32).reshape((4, 4))
+        
+        self._node_camera = self._scene.add(self._camera, pose=self._camera_pose)
+        self._node_light  = self._scene.add(self._light,  pose=self._camera_pose)
+        self._node_mesh   = None
+        self._node_groups = {}
+
+    def set_smpl_mesh(self, mesh):
+        self._mesh = mesh
+        self.reload_mesh()
+
+    def get_mesh_colors(self):
+        return self._mesh.visual.vertex_colors
+    
+    def set_mesh_colors(self, colors):
+        self._mesh.visual.vertex_colors = colors
+
+    def reload_mesh(self):
+        if (self._node_mesh is not None):
+            self._scene.remove_node(self._node_mesh)
+            self._node_mesh = None
+        self._node_mesh = self._scene.add(pyrender.Mesh.from_trimesh(self._mesh))
+
+    def get_camera_pose(self):
+        return self._camera_pose
+    
+    def set_camera_pose(self, camera_pose):
+        self._camera_pose = camera_pose
+
+        self._scene.set_pose(self._node_camera, self._camera_pose)
+        self._scene.set_pose(self._node_light,  self._camera_pose)
+
+    def clear_group(self, group):
+        nodes = self._node_groups.get(group, [])
+        for node in nodes:
+            self._scene.remove_node(node)
+        self._node_groups[group] = []
+
+    def add(self, group, object):
+        nodes = self._node_groups.get(group, [])
+        nodes.append(self._scene.add(object))
+        self._node_groups[group] = nodes
+'''
