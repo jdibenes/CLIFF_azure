@@ -572,13 +572,13 @@ class renderer:
         self._node_camera = self._scene.add(self._camera, 'internal@main@camera', self._camera_pose)
         self._node_light = self._scene.add(self._light, 'internal@main@lamp', self._camera_pose)
 
-    def _set_camera_pose(self, camera_pose):
+    def _camera_set_pose(self, camera_pose):
         self._camera_pose = camera_pose
 
         self._scene.set_pose(self._node_camera, self._camera_pose)
         self._scene.set_pose(self._node_light, self._camera_pose)
 
-    def get_camera_pose(self):
+    def camera_get_pose(self):
         return self._camera_pose
 
     def render(self):
@@ -623,21 +623,44 @@ class renderer:
             for name, item in nodes.items():
                 self._scene.remove_node(item)
 
-    def adjust_yaw(self, angle):
-        self._camera_transform.update_yaw(angle)
-        self._set_camera_pose(self._camera_transform.transform())
+    def camera_adjust(self, yaw=None, pitch=None, distance=None, center=None, relative=True):
+        if (yaw is not None):
+            if (relative):
+                self._camera_transform.update_yaw(yaw)
+            else:
+                self._camera_transform.set_yaw(yaw)
+        if (pitch is not None):
+            if (relative):
+                self._camera_transform.update_pitch(pitch)
+            else:
+                self._camera_transform.set_pitch(pitch)
+        if (distance is not None):
+            if (relative):
+                self._camera_transform.update_distance(distance)
+            else:
+                self._camera_transform.set_distance(distance)
+        if (center is not None):
+            if (relative):
+                self._camera_transform.update_center(center)
+            else:
+                self._camera_transform.set_center(center)
+        self._camera_set_pose(self._camera_transform.transform())
 
-    def adjust_pitch(self, angle):
-        self._camera_transform.update_pitch(angle)
-        self._set_camera_pose(self._camera_transform.transform())
+    def camera_get_parameters(self):
+        yaw = self._camera_transform.get_yaw()
+        pitch = self._camera_transform.get_pitch()
+        distance = self._camera_transform.get_distance()
+        center = self._camera_transform.get_center()
+        tc = self._camera_transform.get_matrix_center()
+        ry = self._camera_transform.get_matrix_yaw()
+        rx = self._camera_transform.get_matrix_pitch()
+        tz = self._camera_transform.get_matrix_distance()
+        return (yaw, pitch, distance, center, tc, ry, rx, tz)
 
-    def adjust_distance(self, delta):
-        self._camera_transform.update_distance(delta)
-        self._set_camera_pose(self._camera_transform.transform())
 
-    def adjust_position(self, delta):
-        self._camera_transform.update_center(delta)
-        self._set_camera_pose(self._camera_transform.transform())
+    
+
+
 
 
 
