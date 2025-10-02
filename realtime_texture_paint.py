@@ -100,7 +100,16 @@ class demo:
         self._mesh_uvx_b = mesh_solver.texture_uv_to_uvx(self._mesh_uv_b.copy(), self._texture_array.shape)
         #self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
         self._test_stamp = mesh_solver.texture_create_text(['Cut', 'Here'], 'arial.ttf', 512, (255, 0, 0, 255), stroke_width=1, spacing=20, pad_factor=(0.05, 0.1))
-        self._offscreen_renderer = mesh_solver.renderer(1280, 720, 700, 700, 640, 360)
+        
+        #self._offscreen_renderer = mesh_solver.renderer(1280, 720, 700, 700, 640, 360)
+        cfg_offscreen = mesh_solver.renderer_create_settings_offscreen(1280, 720)
+        cfg_scene = mesh_solver.renderer_create_settings_scene()
+        cfg_camera = mesh_solver.renderer_create_settings_camera(700, 700, 640, 360)
+        cfg_camera_transform = mesh_solver.renderer_create_settings_camera_transform()
+        cfg_lamp = mesh_solver.renderer_create_settings_lamp()
+        self._offscreen_renderer = mesh_solver.renderer(cfg_offscreen, cfg_scene, cfg_camera, cfg_camera_transform, cfg_lamp)
+
+
 
         # Initialize visualization utilities
         viewport_width, viewport_height = 1280, 720
@@ -273,15 +282,13 @@ class demo:
         self._overlay_array = np.zeros_like(self._texture_array)
         mob = mesh_solver.paint_decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._overlay_array)
         mno = mesh_solver.painter_create_decal(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, mob.paint)
-        mno.invoke_timeslice(0.020)
+        mno.invoke_timeslice(0.200)
         end_time = time.perf_counter()
         print(f'paint image time {end_time-start_time} proc')
 
         alpha = self._overlay_array[:, :, 3:4] / 255
         self._texture_array[:, :, :] = (1-alpha) * self._bg_array + alpha * self._overlay_array
         
-        #mesh2.visual.material.image.frombytes(self._texture_array.tobytes())
-
         self._scene_control.set_smpl_mesh(mesh2)
         self._scene_control.clear_group('arrows')
 
@@ -289,13 +296,45 @@ class demo:
         self._scene_control.set_camera_pose(camera_pose)
 
         self._offscreen_renderer.group_item_add('smpl_meshes', 'mesh_test', mesh_solver.mesh_to_renderer(mesh2))
-        self._offscreen_renderer.set_camera_pose(camera_pose)
+        #self._offscreen_renderer.set_camera_pose(camera_pose)
         
-        #mesh2.visual.material.image.frombytes(self._texture_array.tobytes())
-        color, _ = self._offscreen_renderer.render()
-
-        #cv2.imshow('offscreen test', color)
-        #cv2.waitKey(0)
+        
+        while (True):
+            color, _ = self._offscreen_renderer.render()
+            cv2.imshow('offscreen test', color)
+            key = cv2.waitKey(0) & 0xFF
+            if (key == 68 or key == 100): # d
+                self._offscreen_renderer.adjust_yaw(10)
+            if (key == 65 or key == 97): # a
+                self._offscreen_renderer.adjust_yaw(-10)
+            if (key == 87 or key == 119): # w
+                self._offscreen_renderer.adjust_pitch(10)
+            if (key == 83 or key == 115): # s
+                self._offscreen_renderer.adjust_pitch(-10)
+            if (key == 82 or key == 114): #r
+                self._offscreen_renderer.adjust_distance(-0.1)
+            if (key == 70 or key == 102): #f
+                self._offscreen_renderer.adjust_distance(0.1)
+            if (key == 85 or key == 117): #u
+                pose = self._offscreen_renderer.get_camera_pose()
+                self._offscreen_renderer.adjust_position(0.1 * pose[:3, 1])
+            if (key == 74 or key == 106): #j
+                pose = self._offscreen_renderer.get_camera_pose()
+                self._offscreen_renderer.adjust_position(-0.1 * pose[:3, 1])
+            if (key == 73 or key == 105): #i
+                pose = self._offscreen_renderer.get_camera_pose()
+                self._offscreen_renderer.adjust_position(0.1 * pose[:3, 2])
+            if (key == 75 or key == 107): #k
+                pose = self._offscreen_renderer.get_camera_pose()
+                self._offscreen_renderer.adjust_position(-0.1 * pose[:3, 2])
+            if (key == 78 or key == 110): #n
+                pose = self._offscreen_renderer.get_camera_pose()
+                self._offscreen_renderer.adjust_position(0.1 * pose[:3, 0])
+            if (key == 77 or key == 109): #m
+                pose = self._offscreen_renderer.get_camera_pose()
+                self._offscreen_renderer.adjust_position(-0.1 * pose[:3, 0])
+            if (key == 27):
+                break
 
 
         if (update_region):
@@ -328,3 +367,4 @@ def create_colormap():
 
     return (colormap, mesh_colors)
 '''
+#mesh2.visual.material.image.frombytes(self._texture_array.tobytes())
