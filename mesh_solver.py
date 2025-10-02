@@ -417,14 +417,14 @@ class paint_decal_solid:
         return call(mesh_vertices, face_normal, origin, indices_vertices, indices_uvx, pixels_dst, weights_src, level)
 
 
-def painter_create_brush(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, origin, brush_collection, tolerance=0):
-    mno = mesh_neighborhood_operation_brush(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_uvx, origin, brush_collection, tolerance)
+def painter_create_brush(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, origin, brush, tolerance=0):
+    mno = mesh_neighborhood_operation_brush(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_uvx, origin, brush, tolerance)
     mnp = mesh_neighborhood_processor(mesh_a, {face_index}, mno.paint)
     return mnp
 
 
-def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, origin, decal_collection, tolerance=0):
-    mno = mesh_neighborhood_operation_decal(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_b.face_normals, mesh_uvx, uv_transform, origin, decal_collection, tolerance)
+def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, origin, decal, tolerance=0):
+    mno = mesh_neighborhood_operation_decal(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_b.face_normals, mesh_uvx, uv_transform, origin, decal, tolerance)
     mnp = mesh_neighborhood_processor(mesh_a, {face_index}, mno.paint)
     return mnp
 
@@ -497,6 +497,18 @@ class renderer:
             for name, item in nodes.items():
                 self._scene.remove_node(item)
 
+
+
+    def rotate_yaw(self, angle):
+        p = self.get_camera_pose()
+        r = trimesh.transformations.rotation_matrix(np.radians(angle), [0, 1, 0])        
+        self.set_camera_pose(r@p)
+
+    def rotate_pitch(self, angle):
+        p = self.get_camera_pose()
+        axis = p[:, 0]
+        r = trimesh.transformations.rotation_matrix(np.radians(angle), axis)
+        self.set_camera_pose(r@p)
 
 
 
