@@ -296,43 +296,44 @@ class demo:
         self._scene_control.set_camera_pose(camera_pose)
 
         self._offscreen_renderer.group_item_add('smpl_meshes', 'mesh_test', mesh_solver.mesh_to_renderer(mesh2))
+        # TODO: full SO(3) to zero roll transform:
         #self._offscreen_renderer.set_camera_pose(camera_pose)
-        
-        
-        while (True):
+        use_offscreen = True
+
+        while (use_offscreen):
             color, _ = self._offscreen_renderer.render()
-            cv2.imshow('offscreen test', color)
+            cv2.imshow('offscreen test', cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
             key = cv2.waitKey(0) & 0xFF
             if (key == 68 or key == 100): # d
-                self._offscreen_renderer.adjust_yaw(10)
+                self._offscreen_renderer.camera_adjust(yaw=10)
             if (key == 65 or key == 97): # a
-                self._offscreen_renderer.adjust_yaw(-10)
+                self._offscreen_renderer.camera_adjust(yaw=-10)
             if (key == 87 or key == 119): # w
-                self._offscreen_renderer.adjust_pitch(10)
+                self._offscreen_renderer.camera_adjust(pitch=10)
             if (key == 83 or key == 115): # s
-                self._offscreen_renderer.adjust_pitch(-10)
+                self._offscreen_renderer.camera_adjust(pitch=-10)
             if (key == 82 or key == 114): #r
-                self._offscreen_renderer.adjust_distance(-0.1)
+                self._offscreen_renderer.camera_adjust(distance=-0.1)
             if (key == 70 or key == 102): #f
-                self._offscreen_renderer.adjust_distance(0.1)
+                self._offscreen_renderer.camera_adjust(distance=0.1)
             if (key == 85 or key == 117): #u
-                pose = self._offscreen_renderer.get_camera_pose()
-                self._offscreen_renderer.adjust_position(0.1 * pose[:3, 1])
+                pose = self._offscreen_renderer.camera_get_pose()
+                self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 1])
             if (key == 74 or key == 106): #j
-                pose = self._offscreen_renderer.get_camera_pose()
-                self._offscreen_renderer.adjust_position(-0.1 * pose[:3, 1])
+                pose = self._offscreen_renderer.camera_get_pose()
+                self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 1])
             if (key == 73 or key == 105): #i
-                pose = self._offscreen_renderer.get_camera_pose()
-                self._offscreen_renderer.adjust_position(0.1 * pose[:3, 2])
+                pose = self._offscreen_renderer.camera_get_pose()
+                self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 2])
             if (key == 75 or key == 107): #k
-                pose = self._offscreen_renderer.get_camera_pose()
-                self._offscreen_renderer.adjust_position(-0.1 * pose[:3, 2])
+                pose = self._offscreen_renderer.camera_get_pose()
+                self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 2])
             if (key == 78 or key == 110): #n
-                pose = self._offscreen_renderer.get_camera_pose()
-                self._offscreen_renderer.adjust_position(0.1 * pose[:3, 0])
+                pose = self._offscreen_renderer.camera_get_pose()
+                self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 0])
             if (key == 77 or key == 109): #m
-                pose = self._offscreen_renderer.get_camera_pose()
-                self._offscreen_renderer.adjust_position(-0.1 * pose[:3, 0])
+                pose = self._offscreen_renderer.camera_get_pose()
+                self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 0])
             if (key == 27):
                 break
 
