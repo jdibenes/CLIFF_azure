@@ -654,6 +654,7 @@ class renderer_mesh_paint:
         self._uv_transform = uv_transform
         self._background = background
         self._layers = dict()
+        self._layer_enable = dict()
         self._textures = dict()
         self._brushes = dict()
         self._decals = dict()
@@ -661,6 +662,9 @@ class renderer_mesh_paint:
 
     def layer_create(self, layer_id):
         self._layers[layer_id] = np.zeros_like(self._render_target)
+
+    def layer_enable(self, layer_id, enable):
+        self._layer_enable[layer_id] = enable
 
     def layer_delete(self, layer_id):
         self._layers.pop(layer_id)
@@ -706,8 +710,8 @@ class renderer_mesh_paint:
     def flush(self, force_alpha=None):
         self._render_target[:, :, :] = self._background
         for key in sorted(self._layers.keys()):
-            layer = self._layers[key]
-            self._render_target[:, :, :] = texture_alpha_blend(self._render_target, layer, layer[:, :, 3:4] / 255)
+            if (self._layer_enable[key]):
+                self._render_target[:, :, :] = np.array(Image.alpha_composite(Image.fromarray(self._render_target), Image.fromarray(self._layers[key])))
         if (force_alpha is not None):
             self._render_target[:, :, 3] = force_alpha
 
@@ -740,6 +744,10 @@ class renderer_mesh_paint:
 
         #self._mesh_a = mesh_a # changes every iteration
         #self._mesh_b = mesh_b # changes every iteration
+
+
+
+
 
 
 
