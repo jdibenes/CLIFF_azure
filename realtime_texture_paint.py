@@ -69,9 +69,7 @@ def create_model(img_shape):
 # mesh_b = 7576 vertices 13776 faces 7576 uvs
 # same faces, duplicated vertices for vertices with multiple uv's
 
-def mesh_raycast(mesh, origin, direction):
-    point, rid, tid = mesh.ray.intersects_location(origin, direction, multiple_hits=False)
-    return (point, tid[0]) if (len(rid) > 0) else (None, None)
+
 
 
 class demo:
@@ -98,8 +96,10 @@ class demo:
         self._bg_array = self._texture_array.copy()
         self._mesh_visuals = mesh_solver.texture_create_visual(self._mesh_uv_b, self._texture_array)
         self._mesh_uvx_b = mesh_solver.texture_uv_to_uvx(self._mesh_uv_b.copy(), self._texture_array.shape)
-        #self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
-        self._test_stamp = mesh_solver.texture_create_text(['Cut', 'Here'], 'arial.ttf', 512, (255, 0, 0, 255), stroke_width=1, spacing=20, pad_factor=(0.05, 0.1))
+        self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
+        #font = mesh_solver.texture_load_font('arial.ttf', 512)
+        #self._test_stamp = mesh_solver.texture_create_multiline_text(['Cut', 'Here'], font, (255, 0, 0, 255), (255, 255, 255, 255), 1, 20)
+        #self._test_stamp = mesh_solver.texture_pad(self._test_stamp, 0.05, 0.1, (255, 255, 255, 255))
         
         cfg_offscreen = mesh_solver.renderer_create_settings_offscreen(1280, 720)
         cfg_scene = mesh_solver.renderer_create_settings_scene()
@@ -109,6 +109,10 @@ class demo:
         cfg_camera_transform = mesh_solver.renderer_create_settings_camera_transform()
         cfg_lamp = mesh_solver.renderer_create_settings_lamp(intensity=2.0)
         self._offscreen_renderer = mesh_solver.renderer(cfg_offscreen, cfg_scene, cfg_camera, cfg_camera_transform, cfg_lamp)
+        self._mesh_painter = mesh_solver.renderer_mesh_paint(self._mesh_uvx_b, self._texture_array, self._uv_transform, self._bg_array)
+        self._mesh_painter.texture_attach(0, self._test_stamp)
+        self._mesh_painter.layer_create(0)
+        self._mesh_painter.layer_enable(0, True)
 
         # Initialize visualization utilities
         viewport_width, viewport_height = 1280, 720
@@ -205,7 +209,7 @@ class demo:
         joints = pred_output.joints.cpu().detach().numpy()[0].T
         faces = self._smpl.faces
 
-        mesh = mesh_solver.mesh_create(vertices, faces) #trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        mesh = mesh_solver.mesh_create(vertices, faces)
 
         # todo: project mesh into image
         if (self._next_region is not None):
@@ -254,22 +258,18 @@ class demo:
             distances = None
             selected_indices = None
 
-        vertices_b = mesh.vertices[self._uv_transform, :]
-        faces_b = self._mesh_faces_b
-
         start_time = time.perf_counter()
-        mesh2 = mesh_solver.mesh_create(vertices_b, faces_b, self._mesh_visuals) #trimesh.Trimesh(vertices=vertices_b, faces=faces_b, visual=self._mesh_visuals, process=False)
-
+        mesh2 = mesh_solver.mesh_expand(mesh, self._uv_transform, self._mesh_faces_b, self._mesh_visuals)
         end_time = time.perf_counter()
         #print(f'MESH2 time {end_time-start_time}')
 
         start_time = time.perf_counter()
-        #mob = mesh_solver.paint_brush_gradient(0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, self._texture_array)
-        #mob2 = mesh_solver.paint_brush_solid(0.02, np.array([0, 255, 0, 255], dtype=np.uint8), self._texture_array)
-        #mno = mesh_solver.painter_create_brush(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, [mob2.paint, mob.paint])
-        #mno.invoke_timeslice(0.010)
+        #self._mesh_painter.brush_create_gradient(0, 0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, 0)
+        #self._mesh_painter.brush_create_solid(1, 0.02, np.array([0, 255, 0, 255], dtype=np.uint8), 0)
+        #self._mesh_painter.task_create_paint_brush(0, mesh, mesh2, face_index, point.T, [1, 0])
+        #self._mesh_painter.task_execute(0, 0.033)
         end_time = time.perf_counter()
-        #print(f'paint solid time {end_time-start_time} proc')
+        print(f'paint solid time {end_time-start_time} proc')
 
         align_prior = np.array([[0, 1, 0]], dtype=np.float32)
         align_normal = mesh.face_normals[face_index:(face_index+1), :]
@@ -278,15 +278,16 @@ class demo:
         align_prior = align_prior / np.linalg.norm(align_prior)
 
         start_time = time.perf_counter()
-        self._overlay_array = np.zeros_like(self._texture_array)
-        mob = mesh_solver.paint_decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._overlay_array)
-        mno = mesh_solver.painter_create_decal(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, mob.paint)
-        mno.invoke_timeslice(0.200)
+        self._mesh_painter.decal_create_solid(0, align_prior, 0, 10000 * 2, 0, 0, False)
+        self._mesh_painter.task_create_paint_decal(0, mesh, mesh2, face_index, point.T, 0)
+        self._mesh_painter.task_execute(0, 0.033)
         end_time = time.perf_counter()
         print(f'paint image time {end_time-start_time} proc')
 
-        alpha = self._overlay_array[:, :, 3:4] / 255
-        self._texture_array[:, :, :] = (1-alpha) * self._bg_array + alpha * self._overlay_array
+        start_time = time.perf_counter()
+        self._mesh_painter.flush()
+        end_time = time.perf_counter()
+        print(f'flush image time {end_time-start_time} proc')
         
         self._scene_control.set_smpl_mesh(mesh2)
         self._scene_control.clear_group('arrows')
@@ -296,12 +297,14 @@ class demo:
 
         self._offscreen_renderer.group_item_add('smpl_meshes', 'mesh_test', mesh_solver.mesh_to_renderer(mesh2))
         # TODO: full SO(3) to zero roll transform:
-        self._offscreen_renderer._camera_set_pose(camera_pose)
-        #use_offscreen = True
-        use_offscreen = False
+        #self._offscreen_renderer._camera_set_pose(camera_pose)
+        use_offscreen = True
+        use_plane = True
+        #use_offscreen = False
 
         while (use_offscreen):
             color, _ = self._offscreen_renderer.render()
+            #print(f'RENDER CHANNELS {color.shape}')
             cv2.imshow('offscreen test', cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
             key = cv2.waitKey(0) & 0xFF
             if (key == 68 or key == 100): # d
@@ -317,22 +320,40 @@ class demo:
             if (key == 70 or key == 102): #f
                 self._offscreen_renderer.camera_adjust(distance=0.1)
             if (key == 85 or key == 117): #u
-                pose = self._offscreen_renderer.camera_get_pose()
+                if (use_plane):
+                    pose = self._offscreen_renderer.camera_get_transform_plane()
+                else:
+                    pose = self._offscreen_renderer.camera_get_pose()
                 self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 1])
             if (key == 74 or key == 106): #j
-                pose = self._offscreen_renderer.camera_get_pose()
+                if (use_plane):
+                    pose = self._offscreen_renderer.camera_get_transform_plane()
+                else:
+                    pose = self._offscreen_renderer.camera_get_pose()
                 self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 1])
             if (key == 73 or key == 105): #i
-                pose = self._offscreen_renderer.camera_get_pose()
+                if (use_plane):
+                    pose = self._offscreen_renderer.camera_get_transform_plane()
+                else:
+                    pose = self._offscreen_renderer.camera_get_pose()
                 self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 2])
             if (key == 75 or key == 107): #k
-                pose = self._offscreen_renderer.camera_get_pose()
+                if (use_plane):
+                    pose = self._offscreen_renderer.camera_get_transform_plane()
+                else:
+                    pose = self._offscreen_renderer.camera_get_pose()
                 self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 2])
             if (key == 78 or key == 110): #n
-                pose = self._offscreen_renderer.camera_get_pose()
+                if (use_plane):
+                    pose = self._offscreen_renderer.camera_get_transform_plane()
+                else:
+                    pose = self._offscreen_renderer.camera_get_pose()
                 self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 0])
             if (key == 77 or key == 109): #m
-                pose = self._offscreen_renderer.camera_get_pose()
+                if (use_plane):
+                    pose = self._offscreen_renderer.camera_get_transform_plane()
+                else:
+                    pose = self._offscreen_renderer.camera_get_pose()
                 self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 0])
             if (key == 27):
                 break
@@ -369,3 +390,21 @@ def create_colormap():
     return (colormap, mesh_colors)
 '''
 #mesh2.visual.material.image.frombytes(self._texture_array.tobytes())
+
+        #vertices_b = mesh.vertices[self._uv_transform, :]
+        #faces_b = self._mesh_faces_b
+        #self._overlay_array = np.zeros_like(self._texture_array)
+
+        #mob = mesh_solver.paint_brush_gradient(0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, self._overlay_array)
+        #mob2 = mesh_solver.paint_brush_solid(0.02, np.array([0, 255, 0, 255], dtype=np.uint8), self._overlay_array)
+        #mno = mesh_solver.painter_create_brush(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, [mob2.paint, mob.paint])
+        #mno.invoke_timeslice(0.010)
+
+        #mob = mesh_solver.paint_decal_solid(align_prior, 0, 10000 * 2, self._test_stamp, self._overlay_array)
+        #mno = mesh_solver.painter_create_decal(mesh, mesh2, self._mesh_uvx_b, self._uv_transform, face_index, point.T, mob.paint)
+        #mno.invoke_timeslice(0.200)
+        #alpha = self._overlay_array[:, :, 3:4] / 255
+        #self._texture_array[:, :, :] = (1-alpha) * self._bg_array + alpha * self._overlay_array
+
+        
+        
