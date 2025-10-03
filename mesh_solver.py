@@ -158,6 +158,10 @@ def mesh_create(vertices, faces, visual=None):
     return trimesh.Trimesh(vertices=vertices, faces=faces, visual=visual, process=False)
 
 
+def mesh_expand(mesh, uv_transform, faces_extended, visual=None):
+    return mesh_create(mesh.vertices[uv_transform, :], faces_extended, visual)
+
+
 def mesh_to_renderer(mesh):
     return pyrender.Mesh.from_trimesh(mesh)
 
@@ -579,33 +583,19 @@ class renderer_camera_transform:
         return self._plane_pose
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-class renderer:
-    def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
+class renderer_scene_control:
+    def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_lamp, pose=np.eye(4, dtype=np.float32)):
         self._renderer = pyrender.OffscreenRenderer(**settings_offscreen)
         self._scene = pyrender.Scene(**settings_scene)
         self._camera = pyrender.IntrinsicsCamera(**settings_camera)
-        self._camera_transform = renderer_camera_transform(**settings_camera_transform)
         self._light = pyrender.DirectionalLight(**settings_lamp)
         self._groups = dict()
-
-        self._camera_pose = self._camera_transform.get_transform_local()
+        self._camera_pose = pose
 
         self._node_camera = self._scene.add(self._camera, 'internal@main@camera', self._camera_pose)
         self._node_light = self._scene.add(self._light, 'internal@main@lamp', self._camera_pose)
 
-    def _camera_set_pose(self, camera_pose):
+    def camera_set_pose(self, camera_pose):
         self._camera_pose = camera_pose
 
         self._scene.set_pose(self._node_camera, self._camera_pose)
@@ -624,7 +614,7 @@ class renderer:
         if (previous is not None):
             self._scene.remove_node(previous)
         if (pose is None):
-            pose = np.eye(4)
+            pose = np.eye(4, dtype=self._camera_pose.dtype)
         nodes[name] = self._scene.add(item, 'external@' + group + '@' + name, pose)
         self._groups[group] = nodes
 
@@ -656,6 +646,114 @@ class renderer:
             for name, item in nodes.items():
                 self._scene.remove_node(item)
 
+
+
+
+
+        
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+class renderer_mesh_paint:
+    def __init__(self, uvx, render_target, uv_transform, background):
+        self._uvx = uvx
+        self._render_target = render_target
+        self._uv_transform = uv_transform
+        self._background = background
+
+
+        
+        self._layers = []
+        self._textures = dict()
+        self._brushes = dict()
+
+
+
+    def layer_create(self, layer_id):
+        self._layers[layer_id] = np.zeros_like(self._render_target)
+
+    def texture_register(self, texture_id, texture):
+        self._textures[texture_id] = texture
+
+
+
+    def brush_create_solid(self, brush_id, size, color, layer_id):
+        self._brushes[brush_id] = paint_brush_solid(size, color, self._layers[layer_id])
+
+    def brush_create_gradient(self, brush_id, size, color_center, color_edge, hardness, layer_id):
+        self._brushes[brush_id] = paint_brush_gradient(size, color_center, color_edge, hardness, self._layers[layer_id])
+
+
+
+    def paint_brush(self, face_index, origin, brush_ids, timeout, steps=1, tolerance=0):
+        mno = painter_create_brush(self._mesh_a, self._mesh_b, self._uvx, self._uv_transform, face_index, origin, [self._brushes[brush_id].paint for brush_id in brush_ids], tolerance)
+        mno.invoke_timeslice(timeout, steps)
+
+    def paint_decal_solid(self, face_index, origin, timeout, steps=1, tolerance_decal=0, tolerance_paint=0):
+        pds = paint_decal_solid(align_prior, angle, scale, self._textures[texture_id], self._layers[layer_id], tolerance_decal)
+        mno = painter_create_decal(self._mesh_a, self._mesh_b, self._uvx, self._uv_transform, face_index, origin, [pds.paint], tolerance_paint)
+        mno.invoke_timeslice(timeout, steps)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        #self._mesh_a = mesh_a # changes every iteration
+        #self._mesh_b = mesh_b # changes every iteration
+
+# TODO: ...
+class renderer:
+    def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
+        self._camera_transform = renderer_camera_transform(**settings_camera_transform)
+        self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_lamp, self._camera_transform.get_transform_local())
+
+    def add_mesh(self, group, name, ):
+        pass
+
+
+
+    def _camera_set_pose(self, pose):
+        self._scene_control.camera_set_pose(pose)
+
+    def camera_get_pose(self):
+        return self._scene_control.camera_get_pose()
+    
+    def camera_get_transform_plane(self):
+        return self._camera_transform.get_transform_plane()
+    
+    def group_item_add(self, group, name, item, pose=None):
+        self._scene_control.group_item_add(group, name, item, pose)
+
+    def render(self):
+        return self._scene_control.render()
+    
     def camera_adjust(self, yaw=None, pitch=None, distance=None, center=None, relative=True):
         if (yaw is not None):
             if (relative):
@@ -679,17 +777,42 @@ class renderer:
                 self._camera_transform.set_center(center)
         self._camera_set_pose(self._camera_transform.get_transform_local())
 
-    def camera_get_parameters(self):
-        yaw = self._camera_transform.get_yaw()
-        pitch = self._camera_transform.get_pitch()
-        distance = self._camera_transform.get_distance()
-        center = self._camera_transform.get_center()
-        tc = self._camera_transform.get_matrix_center()
-        ry = self._camera_transform.get_matrix_yaw()
-        rx = self._camera_transform.get_matrix_pitch()
-        tz = self._camera_transform.get_matrix_distance()
-        return (yaw, pitch, distance, center, tc, ry, rx, tz)
 
-    def camera_get_transform_plane(self):
-        return self._camera_transform.get_transform_plane()
+
+
+
+# global transform
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#, settings_camera_transform
+        #self._camera_transform = renderer_camera_transform(**settings_camera_transform)
+
+
+
+def camera_get_parameters(self):
+    yaw = self._camera_transform.get_yaw()
+    pitch = self._camera_transform.get_pitch()
+    distance = self._camera_transform.get_distance()
+    center = self._camera_transform.get_center()
+    tc = self._camera_transform.get_matrix_center()
+    ry = self._camera_transform.get_matrix_yaw()
+    rx = self._camera_transform.get_matrix_pitch()
+    tz = self._camera_transform.get_matrix_distance()
+    return (yaw, pitch, distance, center, tc, ry, rx, tz)
+
     
+
