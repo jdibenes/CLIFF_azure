@@ -20,14 +20,6 @@ def geometry_align_basis(vas, vbs, vad, vbd):
 
 
 #------------------------------------------------------------------------------
-# Image Processing
-#------------------------------------------------------------------------------
-
-def font_load(font_name, font_size):
-    return ImageFont.truetype(font_name, font_size)
-
-
-#------------------------------------------------------------------------------
 # Texture Processing
 #------------------------------------------------------------------------------
 
@@ -52,6 +44,10 @@ def texture_load_uv(filename_uv):
         for vertex_index in range(0, 3):
             uv_transform[mesh_faces_b[face_index, vertex_index]] = mesh_faces_a[face_index, vertex_index]
     return (uv_transform, mesh_faces_b, mesh_uv_b)
+
+
+def texture_load_font(font_name, font_size):
+    return ImageFont.truetype(font_name, font_size)
 
 
 def texture_stack(textures, fill_color, spacing, vertical):
@@ -498,6 +494,10 @@ class renderer_camera_transform:
         self._zfar = zfar
         self._tz = np.eye(4, dtype=center.dtype)
         self._tc = np.eye(4, dtype=center.dtype)
+        self._global_pose = np.eye(4, dtype=center.dtype)
+        self._global_x = self._global_pose[:3, 0]
+        self._global_y = self._global_pose[:3, 1]
+        self._global_z = self._global_pose[:3, 2]
 
         self.set_center(center)
         self.set_yaw(yaw)
@@ -509,7 +509,7 @@ class renderer_camera_transform:
 
     def set_yaw(self, value):
         self._yaw = value
-        self._ry = trimesh.transformations.rotation_matrix(np.radians(self._yaw), [0, 1, 0])
+        self._ry = trimesh.transformations.rotation_matrix(np.radians(self._yaw), self._global_y)
         self._dirty = True
 
     def update_yaw(self, delta):
@@ -520,7 +520,7 @@ class renderer_camera_transform:
 
     def set_pitch(self, value):
         self._pitch = np.clip(value, self._min_pitch, self._max_pitch)
-        self._rx = trimesh.transformations.rotation_matrix(np.radians(self._pitch), [1, 0, 0])
+        self._rx = trimesh.transformations.rotation_matrix(np.radians(self._pitch), self._global_x)
         self._dirty = True
 
     def update_pitch(self, delta):
@@ -560,11 +560,35 @@ class renderer_camera_transform:
     def get_matrix_distance(self):
         return self._tz
 
-    def transform(self):
+    def _update(self):
         if (self._dirty):
-            self._pose = self._tc @ self._ry @ self._rx @ self._tz
+            self._local_pose = self._tc @ self._ry @ self._rx @ self._tz
+            self._local_x = self._local_pose[:3, 0]
+            self._local_y = self._local_pose[:3, 1]
+            self._local_z = self._local_pose[:3, 2]
+            self._plane_z = np.cross(self._local_x, self._global_y)
+            self._plane_pose = np.column_stack((self._local_x, self._global_y, self._plane_z))
             self._dirty = False
-        return self._pose
+
+    def get_transform_local(self):
+        self._update()
+        return self._local_pose
+
+    def get_transform_plane(self):
+        self._update()
+        return self._plane_pose
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class renderer:
@@ -576,7 +600,7 @@ class renderer:
         self._light = pyrender.DirectionalLight(**settings_lamp)
         self._groups = dict()
 
-        self._camera_pose = self._camera_transform.transform()
+        self._camera_pose = self._camera_transform.get_transform_local()
 
         self._node_camera = self._scene.add(self._camera, 'internal@main@camera', self._camera_pose)
         self._node_light = self._scene.add(self._light, 'internal@main@lamp', self._camera_pose)
@@ -653,7 +677,7 @@ class renderer:
                 self._camera_transform.update_center(center)
             else:
                 self._camera_transform.set_center(center)
-        self._camera_set_pose(self._camera_transform.transform())
+        self._camera_set_pose(self._camera_transform.get_transform_local())
 
     def camera_get_parameters(self):
         yaw = self._camera_transform.get_yaw()
@@ -666,3 +690,6 @@ class renderer:
         tz = self._camera_transform.get_matrix_distance()
         return (yaw, pitch, distance, center, tc, ry, rx, tz)
 
+    def camera_get_transform_plane(self):
+        return self._camera_transform.get_transform_plane()
+    
