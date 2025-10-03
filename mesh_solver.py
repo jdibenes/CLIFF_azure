@@ -647,46 +647,29 @@ class renderer_scene_control:
                 self._scene.remove_node(item)
 
 
-
-
-
-        
-
-
-
-
-
-
-        
-
-
-
-
-
-
-
 class renderer_mesh_paint:
     def __init__(self, uvx, render_target, uv_transform, background):
         self._uvx = uvx
         self._render_target = render_target
         self._uv_transform = uv_transform
         self._background = background
-
-
-        
-        self._layers = []
+        self._layers = dict()
         self._textures = dict()
         self._brushes = dict()
-
-
+        self._decals = dict()
+        self._tasks = dict()
 
     def layer_create(self, layer_id):
         self._layers[layer_id] = np.zeros_like(self._render_target)
 
-    def texture_register(self, texture_id, texture):
+    def layer_delete(self, layer_id):
+        self._layers.pop(layer_id)
+
+    def texture_attach(self, texture_id, texture):
         self._textures[texture_id] = texture
 
-
+    def texture_detach(self, texture_id):
+        self._textures.pop(texture_id)
 
     def brush_create_solid(self, brush_id, size, color, layer_id):
         self._brushes[brush_id] = paint_brush_solid(size, color, self._layers[layer_id])
@@ -694,16 +677,46 @@ class renderer_mesh_paint:
     def brush_create_gradient(self, brush_id, size, color_center, color_edge, hardness, layer_id):
         self._brushes[brush_id] = paint_brush_gradient(size, color_center, color_edge, hardness, self._layers[layer_id])
 
+    def brush_delete(self, brush_id):
+        self._brushes.pop(brush_id)
+
+    def decal_create_solid(self, decal_id, align_prior, angle, scale, texture_id, layer_id, tolerance=0):
+        self._decals[decal_id] = paint_decal_solid(align_prior, angle, scale, self._textures[texture_id], self._layers[layer_id], tolerance)
+
+    def decal_delete(self, decal_id):
+        self._decals.pop(decal_id)
+
+    def task_create_paint_brush(self, task_id, mesh_a, mesh_b, face_index, origin, brush_ids, tolerance=0):
+        o = [self._brushes[brush_id].paint for brush_id in brush_ids]
+        self._tasks[task_id] = painter_create_brush(mesh_a, mesh_b, self._uvx, self._uv_transform, face_index, origin, o, tolerance)
+        
+    def task_create_paint_decal(self, task_id, mesh_a, mesh_b, face_index, origin, decal_idx, tolerance=0):
+        o = self._decals[decal_idx].paint
+        self._tasks[task_id] = painter_create_decal(mesh_a, mesh_b, self._uvx, self._uv_transform, face_index, origin, o, tolerance)
+
+    def task_execute(self, task_id, timeout, steps=1):
+        self._tasks[task_id].invoke_timeslice(timeout, steps)
+
+    def task_done(self, task_id):
+        return self._tasks[task_id].done()
+    
+    def task_delete(self, task_id):
+        self._tasks.pop(task_id)
+
+    def flush(self, force_alpha=None):
+        self._render_target[:, :, :] = self._background
+        for key in sorted(self._layers.keys()):
+            layer = self._layers[key]
+            self._render_target[:, :, :] = texture_alpha_blend(self._render_target, layer, layer[:, :, 3:4] / 255)
+        if (force_alpha is not None):
+            self._render_target[:, :, 3] = force_alpha
 
 
-    def paint_brush(self, face_index, origin, brush_ids, timeout, steps=1, tolerance=0):
-        mno = painter_create_brush(self._mesh_a, self._mesh_b, self._uvx, self._uv_transform, face_index, origin, [self._brushes[brush_id].paint for brush_id in brush_ids], tolerance)
-        mno.invoke_timeslice(timeout, steps)
 
-    def paint_decal_solid(self, face_index, origin, timeout, steps=1, tolerance_decal=0, tolerance_paint=0):
-        pds = paint_decal_solid(align_prior, angle, scale, self._textures[texture_id], self._layers[layer_id], tolerance_decal)
-        mno = painter_create_decal(self._mesh_a, self._mesh_b, self._uvx, self._uv_transform, face_index, origin, [pds.paint], tolerance_paint)
-        mno.invoke_timeslice(timeout, steps)
+
+
+
+
 
 
 
@@ -727,6 +740,17 @@ class renderer_mesh_paint:
 
         #self._mesh_a = mesh_a # changes every iteration
         #self._mesh_b = mesh_b # changes every iteration
+
+
+
+
+
+
+
+
+
+
+
 
 # TODO: ...
 class renderer:
