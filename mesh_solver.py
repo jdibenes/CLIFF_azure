@@ -162,6 +162,11 @@ def mesh_expand(mesh, uv_transform, faces_extended, visual=None):
     return mesh_create(mesh.vertices[uv_transform, :], faces_extended, visual)
 
 
+def mesh_raycast(mesh, origin, direction):
+    point, rid, tid = mesh.ray.intersects_location(origin, direction, multiple_hits=False)
+    return (point, tid[0]) if (len(rid) > 0) else (None, None)
+
+
 def mesh_to_renderer(mesh):
     return pyrender.Mesh.from_trimesh(mesh)
 
@@ -325,12 +330,13 @@ class paint_brush_gradient:
 
 
 class paint_decal_solid:
-    def __init__(self, align_prior, angle, scale, image_buffer, render_buffer, tolerance=0):
+    def __init__(self, align_prior, angle, scale, image_buffer, render_buffer, double_cover_test=True, tolerance=0):
         self._align_prior = align_prior
         self._angle = angle
         self._scale = scale
         self._image_buffer = image_buffer
         self._render_buffer = render_buffer
+        self._double_cover_test = double_cover_test
         self._tolerance = tolerance
         self._simplices = []
         self._simplices_map = []
@@ -400,10 +406,11 @@ class paint_decal_solid:
         vxd = ((vxs - vps) @ align_outward) + vpd
         vxd[:, 2] = 0
 
-        for i in range(0, len(self._simplices)):
-            double_cover = self._test_simplex(vxd[:, 0:2], len(self._simplices) - 1 - i)
-            if (double_cover):
-                return mesh_neighborhood_processor_command.IGNORE
+        if (self._double_cover_test):
+            for i in range(0, len(self._simplices)):
+                double_cover = self._test_simplex(vxd[:, 0:2], len(self._simplices) - 1 - i)
+                if (double_cover):
+                    return mesh_neighborhood_processor_command.IGNORE
 
         self._image_uvx[vixs_a:(vixs_a + 1), :] = vxd
         self._push_simplex(np.vstack((vxd[:, 0:2], vqd[:, 0:2], vpd[:, 0:2])))
@@ -684,8 +691,8 @@ class renderer_mesh_paint:
     def brush_delete(self, brush_id):
         self._brushes.pop(brush_id)
 
-    def decal_create_solid(self, decal_id, align_prior, angle, scale, texture_id, layer_id, tolerance=0):
-        self._decals[decal_id] = paint_decal_solid(align_prior, angle, scale, self._textures[texture_id], self._layers[layer_id], tolerance)
+    def decal_create_solid(self, decal_id, align_prior, angle, scale, texture_id, layer_id, double_cover_test=True, tolerance=0):
+        self._decals[decal_id] = paint_decal_solid(align_prior, angle, scale, self._textures[texture_id], self._layers[layer_id], double_cover_test, tolerance)
 
     def decal_delete(self, decal_id):
         self._decals.pop(decal_id)
@@ -760,13 +767,14 @@ class renderer_mesh_paint:
 
 
 
+
 # TODO: ...
 class renderer:
     def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
         self._camera_transform = renderer_camera_transform(**settings_camera_transform)
         self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_lamp, self._camera_transform.get_transform_local())
 
-    def add_mesh(self, group, name, ):
+    def add_mesh(self, group, name):
         pass
 
 
