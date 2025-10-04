@@ -1,6 +1,10 @@
+###############################################################################
+# SMPL Painting And Charting Tools
+###############################################################################
 
 import time
 import math
+import collections
 import numpy as np
 import cv2
 import pyrender
@@ -11,12 +15,31 @@ from PIL import Image, ImageFont, ImageDraw
 
 
 #------------------------------------------------------------------------------
-# Geometry
+# Math
 #------------------------------------------------------------------------------
 
-def geometry_align_basis(vas, vbs, vad, vbd):
+def math_normalize(a):
+    return a / np.linalg.norm(a)
+
+
+#------------------------------------------------------------------------------
+# Geometry Solvers
+#------------------------------------------------------------------------------
+
+def geometry_solve_basis(vas, vbs, vad, vbd):
     # TODO: error for singular matrix
     return np.linalg.inv(np.vstack((vas, vbs, np.cross(vas, vbs)))) @ np.vstack((vad, vbd, np.cross(vad, vbd)))
+
+
+def geometry_solve_fov_z(width, height, fx, fy, x, y, z, center, points):
+    dp = (points - center)
+    dx = np.abs(dp @ x)
+    dy = np.abs(dp @ y)
+    dz = dp @ z
+    wx = dz + ((2 * fx * dx) / width)
+    wy = dz + ((2 * fy * dy) / height)
+    wz = np.max(np.hstack((wy, wx)))
+    return center, wz
 
 
 #------------------------------------------------------------------------------
@@ -164,7 +187,58 @@ def mesh_expand(mesh, uv_transform, faces_extended, visual=None):
 
 def mesh_raycast(mesh, origin, direction):
     point, rid, tid = mesh.ray.intersects_location(origin, direction, multiple_hits=False)
-    return (point, tid[0]) if (len(rid) > 0) else (None, None)
+    if (len(rid) <= 0):
+        return (None, None, None)
+    face_index = tid[0]
+    vertex_indices = mesh.faces.view(np.ndarray)[face_index]
+    vertices = mesh.vertices.view(np.ndarray)[vertex_indices, :]
+    distances = np.linalg.norm(point - vertices, axis=1)
+    snap_index = np.argmin(distances)
+    return point, face_index, vertex_indices[snap_index]
+
+
+def mesh_select_vertices(mesh, origin_vertex_index, radius, level):
+    vertices  = mesh.vertices.view(np.ndarray)
+    neighbors = mesh.vertex_neighbors
+    buffer    = collections.deque()
+    distances = {origin_vertex_index : 0}
+
+    buffer.append((origin_vertex_index, 0, 0))
+
+    while (len(buffer) > 0):
+        vertex_index, vertex_distance, vertex_level = buffer.popleft()
+        vertex_xyz = vertices[vertex_index, :]
+        for neighbor_index in neighbors[vertex_index]:
+            neighbor_xyz = vertices[neighbor_index, :]
+            neighbor_distance = vertex_distance + np.linalg.norm(neighbor_xyz - vertex_xyz)
+            neighbor_level = vertex_level + 1
+            if ((neighbor_distance <= radius) and (neighbor_level <= level) and (neighbor_distance < distances.get(neighbor_index, np.Inf))):          
+                buffer.append((neighbor_index, neighbor_distance, neighbor_level))
+                distances[neighbor_index] = neighbor_distance
+    
+    return distances
+
+
+def mesh_select_complete_faces(mesh, vertex_indices):
+    vertex_faces = mesh.vertex_faces
+    faces = mesh.faces.view(np.ndarray)
+    face_indices_complete = set()
+    vertex_indices_complete = set()
+    vertex_indices_seen = set()
+
+    for vertex_index in vertex_indices:
+        if (vertex_index not in vertex_indices_seen):
+            for face_index in vertex_faces[vertex_index, :]:
+                if (face_index < 0):
+                    break
+                face_vertices = faces[face_index]
+                vertex_indices_seen.update(face_vertices)
+                keep = all([face_vertex in vertex_indices for face_vertex in face_vertices])
+                if (keep):
+                    face_indices_complete.add(face_index)
+                    vertex_indices_complete.update(face_vertices)
+    
+    return face_indices_complete, vertex_indices_complete
 
 
 def mesh_to_renderer(mesh):
@@ -367,7 +441,7 @@ class paint_decal_solid:
 
         vpd = np.array([[self._image_buffer.shape[1] // 2, self._image_buffer.shape[0] // 2, 0]], mesh_vertices.dtype)
 
-        align_outward = geometry_align_basis(self._align_prior, face_normal, self._align_axis * self._scale, self._uvx_normal)
+        align_outward = geometry_solve_basis(self._align_prior, face_normal, self._align_axis * self._scale, self._uvx_normal)
         align_simplex = cv2.Rodrigues(self._uvx_normal * self._angle)[0].T
         
         vxd = (((vxs - vps) @ align_outward) @ align_simplex) + vpd
@@ -401,7 +475,7 @@ class paint_decal_solid:
         vpd = self._image_uvx[vips_a:(vips_a + 1), :]
         vqd = self._image_uvx[viqs_a:(viqs_a + 1), :]
 
-        align_outward = geometry_align_basis(vqs - vps, face_normal, vqd - vpd, self._uvx_normal)
+        align_outward = geometry_solve_basis(vqs - vps, face_normal, vqd - vpd, self._uvx_normal)
 
         vxd = ((vxs - vps) @ align_outward) + vpd
         vxd[:, 2] = 0
@@ -442,6 +516,202 @@ def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, ori
     mno = mesh_neighborhood_operation_decal(mesh_b.vertices.view(np.ndarray), mesh_b.faces.view(np.ndarray), mesh_b.face_normals, mesh_uvx, uv_transform, origin, decal, tolerance)
     mnp = mesh_neighborhood_processor(mesh_a, {face_index}, mno.paint)
     return mnp
+
+
+#------------------------------------------------------------------------------
+# Mesh Chart
+#------------------------------------------------------------------------------
+
+class mesh_smpl_chart:
+    def __init__(self, joints):
+        self._joints = joints
+
+    def _create_frame_foot(self, bigtoe, smalltoe, ankle, heel):
+        left  = np.cross(ankle - heel, bigtoe - ankle)
+        front = np.cross(left, ankle - smalltoe)
+        up    = np.cross(front, left)
+
+        left  = math_normalize(left)
+        front = math_normalize(front)
+        up    = math_normalize(up)
+
+        center = (ankle + bigtoe) * 0.5
+        points = np.vstack((bigtoe, smalltoe, ankle, heel))
+
+        return (left, up, front, center, points)
+    
+    def create_frame_foot_left(self):
+        bigtoe   = self._joints[19:20, :]
+        smalltoe = self._joints[20:21, :]
+        ankle    = self._joints[14:15, :]
+        heel     = self._joints[21:22, :]
+
+        return self._create_frame_foot(bigtoe, smalltoe, ankle, heel)
+    
+    def create_frame_foot_right(self):
+        bigtoe   = self._joints[22:23, :]
+        smalltoe = self._joints[23:24, :]
+        ankle    = self._joints[11:12, :]
+        heel     = self._joints[24:25, :]
+
+        return self._create_frame_foot(bigtoe, smalltoe, ankle, heel)
+
+    def _create_frame_lower_leg(self, bigtoe, ankle, knee):
+        up    = knee - ankle
+        left  = np.cross(up, bigtoe - ankle)
+        front = np.cross(left, up)
+
+        up    = math_normalize(up)
+        left  = math_normalize(left)
+        front = math_normalize(front)
+
+        center = (ankle + knee) * 0.5
+        points = np.vstack((bigtoe, ankle, knee))
+
+        return (left, up, front, center, points)
+
+    def create_frame_lower_leg_left(self):
+        bigtoe = self._joints[19:20, :]
+        ankle  = self._joints[14:15, :]
+        knee   = self._joints[13:14, :]
+
+        return self._create_frame_lower_leg(bigtoe, ankle, knee)
+    
+    def create_frame_lower_leg_right(self):
+        bigtoe = self._joints[22:23, :]
+        ankle  = self._joints[11:12, :]
+        knee   = self._joints[10:11, :]
+
+        return self._create_frame_lower_leg(bigtoe, ankle, knee)
+
+    def _create_frame_thigh(self, ankle, knee, hip):
+        up    = hip - knee
+        left  = np.cross(up, knee - ankle)
+        front = np.cross(left, up)
+
+        up    = math_normalize(up)
+        left  = math_normalize(left)
+        front = math_normalize(front)
+
+        center = (hip + knee) * 0.5
+        points = np.vstack((knee, hip))
+
+        return (left, up, front, center, points)
+    
+    def create_frame_thigh_left(self):
+        ankle = self._joints[14:15, :]
+        knee  = self._joints[13:14, :]
+        hip   = self._joints[12:13, :]
+
+        return self._create_frame_thigh(ankle, knee, hip)
+
+    def create_frame_thigh_right(self):
+        ankle = self._joints[11:12, :]
+        knee  = self._joints[10:11, :]
+        hip   = self._joints[9:10, :]
+
+        return self._create_frame_thigh(ankle, knee, hip)
+    
+    def _create_frame_body(self, lhip, mhip, rhip, neck):
+        left  = lhip - rhip
+        front = np.cross(left, neck - mhip)
+        up    = np.cross(front, left)
+
+        up    = math_normalize(up)
+        left  = math_normalize(left)
+        front = math_normalize(front)
+
+        center = (mhip + neck) * 0.5
+        points = np.vstack((lhip, mhip, rhip, neck))
+        
+        return (left, up, front, center, points)
+    
+    def create_frame_body_center(self):
+        lhip = self._joints[12:13, :]
+        mhip = self._joints[8:9, :]
+        rhip = self._joints[9:10, :]
+        neck = self._joints[1:2, :]
+
+        return self._create_frame_body(lhip, mhip, rhip, neck)
+
+    def _create_frame_head(self, lear, rear, neck, nose):
+        left  = lear - rear
+        up    = lear - neck
+        front = np.cross(left, up)
+        up    = np.cross(front, left)
+
+        left  = math_normalize(left)
+        up    = math_normalize(up)
+        front = math_normalize(front)
+
+        center = (nose + lear + rear) / 3
+        points = np.vstack((lear, rear, neck, nose))
+
+        return (left, up, front, center, points)
+    
+    def create_frame_head_center(self):
+        lear = self._joints[18:19, :]
+        rear = self._joints[17:18, :]
+        neck = self._joints[1:2, :]
+        nose = self._joints[0:1, :]
+
+        return self._create_frame_head(lear, rear, neck, nose)
+    
+    def _create_frame_upper_arm(self, wrist, elbow, shoulder):
+        up    = shoulder - elbow
+        left  = np.cross(up, wrist - elbow)
+        front = np.cross(left, up)
+
+        left  = math_normalize(left)
+        up    = math_normalize(up)
+        front = math_normalize(front)
+
+        center = (elbow + shoulder) * 0.5
+        points = np.vstack((shoulder, elbow))
+
+        return (left, up, front, center, points)
+
+    def create_frame_upper_arm_left(self):
+        wrist    = self._joints[7:8, :]
+        elbow    = self._joints[6:7, :]
+        shoulder = self._joints[5:6, :]
+
+        return self._create_frame_upper_arm(wrist, elbow, shoulder)
+
+    def create_frame_upper_arm_right(self):
+        wrist    = self._joints[4:5, :]
+        elbow    = self._joints[3:4, :]
+        shoulder = self._joints[2:3, :]
+
+        return self._create_frame_upper_arm(wrist, elbow, shoulder)
+
+    def _create_frame_lower_arm(self, wrist, elbow, shoulder):
+        up = elbow - wrist
+        left = np.cross(up, shoulder - elbow)
+        front = np.cross(left, up)
+
+        left  = math_normalize(left)
+        up    = math_normalize(up)
+        front = math_normalize(front)
+
+        center = (elbow + wrist) * 0.5
+        points = np.vstack((wrist, elbow))
+
+        return (left, up, front, center, points)
+
+    def create_frame_lower_arm_left(self):
+        wrist    = self._joints[7:8, :]
+        elbow    = self._joints[6:7, :]
+        shoulder = self._joints[5:6, :]
+
+        return self._create_frame_lower_arm(wrist, elbow, shoulder)
+
+    def create_frame_lower_arm_right(self):
+        wrist    = self._joints[4:5, :]
+        elbow    = self._joints[3:4, :]
+        shoulder = self._joints[2:3, :]
+
+        return self._create_frame_lower_arm(wrist, elbow, shoulder)
 
 
 #------------------------------------------------------------------------------
@@ -673,6 +943,9 @@ class renderer_mesh_paint:
     def layer_enable(self, layer_id, enable):
         self._layer_enable[layer_id] = enable
 
+    def layer_clear(self, layer_id):
+        self._layers[layer_id][:, :, :] = 0
+
     def layer_delete(self, layer_id):
         self._layers.pop(layer_id)
 
@@ -749,8 +1022,22 @@ class renderer_mesh_paint:
 
 
 
-        #self._mesh_a = mesh_a # changes every iteration
-        #self._mesh_b = mesh_b # changes every iteration
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -821,25 +1108,15 @@ class renderer:
 
 
 
+
 # global transform
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#p[:3, 3:4] = (center + wz * z)
+#self._mesh_a = mesh_a # changes every iteration
+#self._mesh_b = mesh_b # changes every iteration
 
 #, settings_camera_transform
-        #self._camera_transform = renderer_camera_transform(**settings_camera_transform)
+#self._camera_transform = renderer_camera_transform(**settings_camera_transform)
+
 
 
 
@@ -855,4 +1132,8 @@ def camera_get_parameters(self):
     return (yaw, pitch, distance, center, tc, ry, rx, tz)
 
     
+
+
+
+
 
