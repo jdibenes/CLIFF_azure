@@ -523,7 +523,7 @@ def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, ori
 # Mesh Chart
 #------------------------------------------------------------------------------
 
-class mesh_smpl_chart:
+class smpl_mesh_chart:
     def __init__(self, mesh, joints):
         self._mesh = mesh
         self._joints = joints
@@ -1039,6 +1039,7 @@ class renderer_mesh_paint:
 
 
 
+
     
 
 
@@ -1081,40 +1082,65 @@ class renderer:
         mesh_a_tri = mesh_create(vertices, faces)
         mesh_b_tri = mesh_expand(mesh_a_tri, self._uv_transform, self._mesh_b_faces, visual)
         mesh_b_pyr = mesh_to_renderer(mesh_b_tri)
-        mesh_a_map = mesh_smpl_chart(mesh_a_tri, joints)
-        self._scene_control.group_item_add('smpl', name, mesh_b_pyr, pose)
-        
+        mesh_a_map = smpl_mesh_chart(mesh_a_tri, joints)
+        self._scene_control.group_item_add('smpl', name, mesh_b_pyr, pose)        
         self._smpl_meshes[name] = [mesh_a_tri, mesh_b_tri, mesh_b_pyr, mesh_a_map, pose]
 
+
+
+
     def smpl_create_frame(self, name, region):
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]  # TODO: pose
         return chart.create_frame(region)
     
     def smpl_get_surface_point(self, name, frame, y, theta):
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
         return chart.get_surface_point(frame, y, theta)
 
     def smpl_raycast(self, name, origin, direction):
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
         return mesh_raycast(mesh_a, origin, direction)
 
-    def smpl_closest(self, name, origin):
+    def smpl_closest(self, name, origin):  # TODO: pose
         pass
+
+
+
 
     def smpl_paint_brush_solid(self, name, anchor, size, color, timeout=0.05, steps=1, tolerance=0):
-        visual, effect = self._smpl_render[name]
         mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
-        origin = anchor[0]
-        face_index = anchor[1]
+        visual, effect = self._smpl_render[name]
         effect.brush_create_solid(0, size, color, 0)
-        effect.task_create_paint_brush(0, mesh_a, mesh_b, face_index, origin, [0], tolerance)
+        effect.task_create_paint_brush(0, mesh_a, mesh_b, anchor[1], anchor[0], [0], tolerance)
         effect.task_execute(0, timeout, steps)
 
-    def smpl_paint_brush_gradient(self):
-        pass
+    def smpl_paint_brush_gradient(self, name, anchor, size, color_center, color_edge, hardness, timeout=0.05, steps=1, tolerance=0):
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        visual, effect = self._smpl_render[name]
+        effect.brush_create_gradient(1, size, color_center, color_edge, hardness, 0)
+        effect.task_create_paint_brush(1, mesh_a, mesh_b, anchor[1], anchor[0], [1], tolerance)
+        effect.task_execute(1, timeout, steps)
 
-    def smpl_paint_decal_solid(self):
-        pass
+
+
+
+
+
+
+    def smpl_paint_decal_solid(self, name, anchor, decal, angle, scale, double_cover_test=True, timeout=0.05, steps=1, tolerance_decal=0, tolerance_paint=0):
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        visual, effect = self._smpl_render[name]
+        face_index = anchor[1]
+        
+        align_normal = mesh_a.face_normals[face_index:(face_index+1), :]
+        align_prior = align_normal.copy()
+        align_prior[:, :] = [0, 1, 0]
+        align_prior = math_normalize(align_prior - (align_normal @ align_prior.T) * align_normal)
+
+        effect.texture_attach(0, decal)
+        effect.decal_create_solid(0, align_prior, angle, scale, 0, 0, double_cover_test, tolerance_decal)
+        effect.task_create_paint_decal(2, mesh_a, mesh_b, face_index, anchor[0], 0, tolerance_paint)
+        effect.task_execute(2, timeout, steps)
 
     def smpl_paint_flush(self, name):
         visual, effect = self._smpl_render[name]
@@ -1126,6 +1152,9 @@ class renderer:
         visual, effect = self._smpl_render[name]
         effect.layer_clear(0)
 
+    
+    
+    
     
     
     
