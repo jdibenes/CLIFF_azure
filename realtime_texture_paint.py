@@ -24,6 +24,10 @@ import mesh_solver
 import visualizer
 
 
+def mesh_raycast(mesh, origin, direction):
+    point, rid, tid = mesh.ray.intersects_location(origin, direction, multiple_hits=False)
+    return (point, tid[0]) if (len(rid) > 0) else (None, None)
+
 
 def preprocess_frame(frame, target_size=(224, 224)):
     """
@@ -286,6 +290,7 @@ class demo:
 
         start_time = time.perf_counter()
         self._mesh_painter.flush()
+        self._mesh_painter.layer_clear(0)
         end_time = time.perf_counter()
         print(f'flush image time {end_time-start_time} proc')
         
@@ -300,7 +305,6 @@ class demo:
         #self._offscreen_renderer._camera_set_pose(camera_pose)
         use_offscreen = True
         use_plane = True
-        #use_offscreen = False
 
         while (use_offscreen):
             color, _ = self._offscreen_renderer.render()
