@@ -19,16 +19,18 @@ from PIL import Image, ImageFont, ImageDraw
 # Math
 #------------------------------------------------------------------------------
 
+# TODO: m == 0??
 def math_normalize(a):
-    return a / np.linalg.norm(a)
+    m = np.linalg.norm(a)
+    return a / m, m
 
 
 #------------------------------------------------------------------------------
 # Geometry Solvers
 #------------------------------------------------------------------------------
 
+# TODO: error for singular matrix
 def geometry_solve_basis(vas, vbs, vad, vbd):
-    # TODO: error for singular matrix
     return np.linalg.inv(np.vstack((vas, vbs, np.cross(vas, vbs)))) @ np.vstack((vad, vbd, np.cross(vad, vbd)))
 
 
@@ -40,7 +42,7 @@ def geometry_solve_fov_z(width, height, fx, fy, x, y, z, center, points):
     wx = dz + ((2 * fx * dx) / width)
     wy = dz + ((2 * fy * dy) / height)
     wz = np.max(np.hstack((wy, wx)))
-    return (center, wz)
+    return wz
 
 
 #------------------------------------------------------------------------------
@@ -118,8 +120,8 @@ def texture_uvx_invert(uvx, image_shape, axis):
     return uvx
 
 
+# TODO: ignores last row and column to simplify bilinear interpolation
 def texture_test_inside(texture, x, y):
-    # ignore last row and column to simplify bilinear interpolation
     return (x >= 0) & (y >= 0) & (x < (texture.shape[1] - 1)) & (y < (texture.shape[0] - 1))
 
 
@@ -137,12 +139,10 @@ def texture_read(texture, x, y):
     x1 = x0 + 1
     y1 = y0 + 1
 
-    # sqrt space
     return b0 * (a0 * texture[y0, x0, :] + a1 * texture[y0, x1, :]) + b1 * (a0 * texture[y1, x0, :] + a1 * texture[y1, x1, :])
 
 
 def texture_alpha_blend(texture_1a, texture_a, alpha):
-    # sqrt space
     return (1 - alpha) * texture_1a + alpha * texture_a
 
 
@@ -188,14 +188,19 @@ def mesh_expand(mesh, uv_transform, faces_extended, visual=None):
 
 def mesh_raycast(mesh, origin, direction):
     point, rid, tid = mesh.ray.intersects_location(origin, direction, multiple_hits=False)
-    if (len(rid) <= 0):
-        return (None, None, None)
-    face_index = tid[0]
+    return (point, tid[0]) if (len(rid) > 0) else (None, None)
+
+
+def mesh_closest(mesh, origin):
+    point, distance, tid = mesh.nearest.on_surface(origin)
+    return (point, distance[0], tid[0]) if (len(tid) > 0) else (None, None, None)
+
+
+def mesh_snap_to_vertex(mesh, point, face_index):
     vertex_indices = mesh.faces.view(np.ndarray)[face_index]
     vertices = mesh.vertices.view(np.ndarray)[vertex_indices, :]
     distances = np.linalg.norm(point - vertices, axis=1)
-    snap_index = np.argmin(distances)
-    return (point, face_index, snap_index)
+    return np.argmin(distances)
 
 
 def mesh_select_vertices(mesh, origin_vertex_index, radius, level):
@@ -523,6 +528,7 @@ def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, ori
 # Mesh Chart
 #------------------------------------------------------------------------------
 
+# TODO: remove hardcoded joints, adapt to normal SMPL joints
 class smpl_mesh_chart:
     def __init__(self, mesh, joints):
         self._mesh = mesh
@@ -536,22 +542,48 @@ class smpl_mesh_chart:
             self._cache[region] = frame
         return frame
     
-    def get_surface_point(self, frame, y, theta):
-        left, up, front, center, length, points = frame        
+    def from_cylindrical(self, frame, y, theta):
+        left, up, front, center, length, points = frame
         position = center + y * up
         orientation = cv2.Rodrigues(up * -theta)[0]
         direction = front @ orientation
-        point, face_index, snap_index = mesh_raycast(self._mesh, position, direction)
-        return (point, face_index, snap_index, position, orientation, direction)
+        point, face_index = mesh_raycast(self._mesh, position, direction)
+        return (point, face_index, position, orientation, direction)
+    
+    def to_cylindrical(self, frame, point):
+        left, up, front, center, length, points = frame
+        offset = point - center
+        y = offset @ up.T
+        xz = offset - y * up
+        theta = np.arctan2(left @ xz.T, front @ xz.T)
+        return (y, theta)
+    
+    def from_spherical(self, frame, alpha, beta):
+        left, up, front, center, length, points = frame
+        orientation = cv2.Rodrigues(left * beta)[0] @ cv2.Rodrigues(up * -alpha)[0]
+        position = center
+        direction = front @ orientation
+        point, face_index = mesh_raycast(self._mesh, position, direction)
+        return (point, face_index, position, orientation, direction)
+    
+    def to_spherical(self, frame, point):
+        left, up, front, center, length, points = frame
+        offset = point - center
+        y = offset @ up.T
+        xz = offset - y * up
+        beta = (np.pi / 2) - np.arccos(y / np.linalg.norm(offset)) # TODO
+        alpha = np.arctan2(left @ xz.T, front @ xz.T)
+        return (alpha, beta)
+
 
     def _template_frame_foot(self, bigtoe, smalltoe, ankle, heel):
         left  = np.cross(ankle - heel, bigtoe - ankle)
         front = np.cross(left, ankle - smalltoe)
         up    = np.cross(front, left)
 
-        left  = math_normalize(left)
-        front = math_normalize(front)
-        up    = math_normalize(up)
+        left  = math_normalize(left)[0]
+        front = math_normalize(front)[0]
+        up    = math_normalize(up)[0]
 
         center = (ankle + bigtoe) * 0.5
         length = np.linalg.norm(ankle - bigtoe)
@@ -580,9 +612,9 @@ class smpl_mesh_chart:
         left  = np.cross(up, bigtoe - ankle)
         front = np.cross(left, up)
 
-        up    = math_normalize(up)
-        left  = math_normalize(left)
-        front = math_normalize(front)
+        up    = math_normalize(up)[0]
+        left  = math_normalize(left)[0]
+        front = math_normalize(front)[0]
 
         center = (ankle + knee) * 0.5
         length = np.linalg.norm(ankle - knee)
@@ -609,9 +641,9 @@ class smpl_mesh_chart:
         left  = np.cross(up, knee - ankle)
         front = np.cross(left, up)
 
-        up    = math_normalize(up)
-        left  = math_normalize(left)
-        front = math_normalize(front)
+        up    = math_normalize(up)[0]
+        left  = math_normalize(left)[0]
+        front = math_normalize(front)[0]
 
         center = (hip + knee) * 0.5
         length = np.linalg.norm(hip - knee)
@@ -638,9 +670,9 @@ class smpl_mesh_chart:
         front = np.cross(left, neck - mhip)
         up    = np.cross(front, left)
 
-        up    = math_normalize(up)
-        left  = math_normalize(left)
-        front = math_normalize(front)
+        up    = math_normalize(up)[0]
+        left  = math_normalize(left)[0]
+        front = math_normalize(front)[0]
 
         center = (mhip + neck) * 0.5
         length = np.linalg.norm(mhip - neck)
@@ -662,9 +694,9 @@ class smpl_mesh_chart:
         front = np.cross(left, up)
         up    = np.cross(front, left)
 
-        left  = math_normalize(left)
-        up    = math_normalize(up)
-        front = math_normalize(front)
+        left  = math_normalize(left)[0]
+        up    = math_normalize(up)[0]
+        front = math_normalize(front)[0]
 
         center = (nose + lear + rear) / 3
         length = np.linalg.norm(neck - nose)
@@ -685,9 +717,9 @@ class smpl_mesh_chart:
         left  = np.cross(up, wrist - elbow)
         front = np.cross(left, up)
 
-        left  = math_normalize(left)
-        up    = math_normalize(up)
-        front = math_normalize(front)
+        left  = math_normalize(left)[0]
+        up    = math_normalize(up)[0]
+        front = math_normalize(front)[0]
 
         center = (elbow + shoulder) * 0.5
         length = np.linalg.norm(elbow - shoulder)
@@ -714,9 +746,9 @@ class smpl_mesh_chart:
         left = np.cross(up, shoulder - elbow)
         front = np.cross(left, up)
 
-        left  = math_normalize(left)
-        up    = math_normalize(up)
-        front = math_normalize(front)
+        left  = math_normalize(left)[0]
+        up    = math_normalize(up)[0]
+        front = math_normalize(front)[0]
 
         center = (elbow + wrist) * 0.5
         length = np.linalg.norm(elbow - wrist)
@@ -1036,10 +1068,16 @@ class renderer_mesh_paint:
 
 
 
+
+
+
+
+
 def mesh_create_cone(radius, height, sections):
     return trimesh.creation.cone(radius=radius, height=height, sections=sections)
 
-
+def mesh_create_sphere(radius):
+    return trimesh.creation.icosphere(radius=radius)
 
     
 
@@ -1088,17 +1126,30 @@ class renderer:
         self._smpl_meshes[name] = [mesh_a_tri, mesh_b_tri, mesh_b_pyr, mesh_a_map, pose]
 
 
-    def mesh_add(self, mesh, pose):
-        self._scene_control.group_item_add('arrow', 'cursor', mesh_to_renderer(mesh), pose)
+    def mesh_add(self, name, mesh, pose):
+        self._scene_control.group_item_add('arrow', name, mesh_to_renderer(mesh), pose)
 
 
     def smpl_create_frame(self, name, region):
         mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]  # TODO: pose
         return chart.create_frame(region)
     
-    def smpl_get_surface_point(self, name, frame, y, theta):
+    def smpl_from_cylindrical(self, name, frame, y, theta):
         mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
-        return chart.get_surface_point(frame, y, theta)
+        return chart.from_cylindrical(frame, y, theta)
+    
+    def smpl_to_cylindrical(self, name, frame, point):
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
+        return chart.to_cylindrical(frame, point)
+    
+    def smpl_from_spherical(self, name, frame, yaw, pitch):
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
+        return chart.from_spherical(frame, yaw, pitch)
+    
+    def smpl_to_spherical(self, name, frame, point):
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
+        return chart.to_spherical(frame, point)
+
 
     def smpl_raycast(self, name, origin, direction):
         mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
@@ -1138,7 +1189,7 @@ class renderer:
         align_normal = mesh_a.face_normals[face_index:(face_index+1), :]
         align_prior = align_normal.copy()
         align_prior[:, :] = [0, 1, 0]
-        align_prior = math_normalize(align_prior - (align_normal @ align_prior.T) * align_normal)
+        align_prior = math_normalize(align_prior - (align_normal @ align_prior.T) * align_normal)[0]
 
         effect.texture_attach(0, decal)
         effect.decal_create_solid(0, align_prior, angle, scale, 0, 0, double_cover_test, tolerance_decal)
@@ -1285,3 +1336,29 @@ def camera_get_parameters(self):
 
 
 
+'''
+     0: 'pelvis',
+     1: 'left_hip',
+     2: 'right_hip',
+     3: 'spine1',
+     4: 'left_knee',
+     5: 'right_knee',
+     6: 'spine2',
+     7: 'left_ankle',
+     8: 'right_ankle',
+     9: 'spine3',
+    10: 'left_foot',
+    11: 'right_foot',
+    12: 'neck',
+    13: 'left_collar',
+    14: 'right_collar',
+    15: 'head',
+    16: 'left_shoulder',
+    17: 'right_shoulder',
+    18: 'left_elbow',
+    19: 'right_elbow',
+    20: 'left_wrist',
+    21: 'right_wrist',
+    22: 'left_hand',
+    23: 'right_hand'
+'''
