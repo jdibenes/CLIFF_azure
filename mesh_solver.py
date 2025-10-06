@@ -5,6 +5,7 @@
 import time
 import math
 import collections
+import operator
 import numpy as np
 import cv2
 import pyrender
@@ -39,7 +40,7 @@ def geometry_solve_fov_z(width, height, fx, fy, x, y, z, center, points):
     wx = dz + ((2 * fx * dx) / width)
     wy = dz + ((2 * fy * dy) / height)
     wz = np.max(np.hstack((wy, wx)))
-    return center, wz
+    return (center, wz)
 
 
 #------------------------------------------------------------------------------
@@ -194,7 +195,7 @@ def mesh_raycast(mesh, origin, direction):
     vertices = mesh.vertices.view(np.ndarray)[vertex_indices, :]
     distances = np.linalg.norm(point - vertices, axis=1)
     snap_index = np.argmin(distances)
-    return point, face_index, vertex_indices[snap_index]
+    return (point, face_index, snap_index)
 
 
 def mesh_select_vertices(mesh, origin_vertex_index, radius, level):
@@ -238,7 +239,7 @@ def mesh_select_complete_faces(mesh, vertex_indices):
                     face_indices_complete.add(face_index)
                     vertex_indices_complete.update(face_vertices)
     
-    return face_indices_complete, vertex_indices_complete
+    return (face_indices_complete, vertex_indices_complete)
 
 
 def mesh_to_renderer(mesh):
@@ -523,10 +524,27 @@ def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, ori
 #------------------------------------------------------------------------------
 
 class mesh_smpl_chart:
-    def __init__(self, joints):
+    def __init__(self, mesh, joints):
+        self._mesh = mesh
         self._joints = joints
+        self._cache = dict()
 
-    def _create_frame_foot(self, bigtoe, smalltoe, ankle, heel):
+    def create_frame(self, region):
+        frame = self._cache.get(region, None)
+        if (frame is None):
+            frame = operator.methodcaller('_create_frame_' + region)(self)
+            self._cache[region] = frame
+        return frame
+    
+    def get_surface_point(self, frame, y, theta):
+        left, up, front, center, length, points = frame        
+        position = center + y * up
+        orientation = cv2.Rodrigues(up * -theta)[0]
+        direction = front @ orientation
+        point, face_index, snap_index = mesh_raycast(self._mesh, position, direction)
+        return (point, face_index, snap_index, position, orientation, direction)
+
+    def _template_frame_foot(self, bigtoe, smalltoe, ankle, heel):
         left  = np.cross(ankle - heel, bigtoe - ankle)
         front = np.cross(left, ankle - smalltoe)
         up    = np.cross(front, left)
@@ -536,27 +554,28 @@ class mesh_smpl_chart:
         up    = math_normalize(up)
 
         center = (ankle + bigtoe) * 0.5
+        length = np.linalg.norm(ankle - bigtoe)
         points = np.vstack((bigtoe, smalltoe, ankle, heel))
 
-        return (left, up, front, center, points)
+        return (left, up, front, center, length, points)
     
-    def create_frame_foot_left(self):
+    def _create_frame_foot_left(self):
         bigtoe   = self._joints[19:20, :]
         smalltoe = self._joints[20:21, :]
         ankle    = self._joints[14:15, :]
         heel     = self._joints[21:22, :]
 
-        return self._create_frame_foot(bigtoe, smalltoe, ankle, heel)
+        return self._template_frame_foot(bigtoe, smalltoe, ankle, heel)
     
-    def create_frame_foot_right(self):
+    def _create_frame_foot_right(self):
         bigtoe   = self._joints[22:23, :]
         smalltoe = self._joints[23:24, :]
         ankle    = self._joints[11:12, :]
         heel     = self._joints[24:25, :]
 
-        return self._create_frame_foot(bigtoe, smalltoe, ankle, heel)
+        return self._template_frame_foot(bigtoe, smalltoe, ankle, heel)
 
-    def _create_frame_lower_leg(self, bigtoe, ankle, knee):
+    def _template_frame_lower_leg(self, bigtoe, ankle, knee):
         up    = knee - ankle
         left  = np.cross(up, bigtoe - ankle)
         front = np.cross(left, up)
@@ -566,25 +585,26 @@ class mesh_smpl_chart:
         front = math_normalize(front)
 
         center = (ankle + knee) * 0.5
+        length = np.linalg.norm(ankle - knee)
         points = np.vstack((bigtoe, ankle, knee))
 
-        return (left, up, front, center, points)
+        return (left, up, front, center, length, points)
 
-    def create_frame_lower_leg_left(self):
+    def _create_frame_lower_leg_left(self):
         bigtoe = self._joints[19:20, :]
         ankle  = self._joints[14:15, :]
         knee   = self._joints[13:14, :]
 
-        return self._create_frame_lower_leg(bigtoe, ankle, knee)
+        return self._template_frame_lower_leg(bigtoe, ankle, knee)
     
-    def create_frame_lower_leg_right(self):
+    def _create_frame_lower_leg_right(self):
         bigtoe = self._joints[22:23, :]
         ankle  = self._joints[11:12, :]
         knee   = self._joints[10:11, :]
 
-        return self._create_frame_lower_leg(bigtoe, ankle, knee)
+        return self._template_frame_lower_leg(bigtoe, ankle, knee)
 
-    def _create_frame_thigh(self, ankle, knee, hip):
+    def _template_frame_thigh(self, ankle, knee, hip):
         up    = hip - knee
         left  = np.cross(up, knee - ankle)
         front = np.cross(left, up)
@@ -594,25 +614,26 @@ class mesh_smpl_chart:
         front = math_normalize(front)
 
         center = (hip + knee) * 0.5
+        length = np.linalg.norm(hip - knee)
         points = np.vstack((knee, hip))
 
-        return (left, up, front, center, points)
+        return (left, up, front, center, length, points)
     
-    def create_frame_thigh_left(self):
+    def _create_frame_thigh_left(self):
         ankle = self._joints[14:15, :]
         knee  = self._joints[13:14, :]
         hip   = self._joints[12:13, :]
 
-        return self._create_frame_thigh(ankle, knee, hip)
+        return self._template_frame_thigh(ankle, knee, hip)
 
-    def create_frame_thigh_right(self):
+    def _create_frame_thigh_right(self):
         ankle = self._joints[11:12, :]
         knee  = self._joints[10:11, :]
         hip   = self._joints[9:10, :]
 
-        return self._create_frame_thigh(ankle, knee, hip)
+        return self._template_frame_thigh(ankle, knee, hip)
     
-    def _create_frame_body(self, lhip, mhip, rhip, neck):
+    def _template_frame_body(self, lhip, mhip, rhip, neck):
         left  = lhip - rhip
         front = np.cross(left, neck - mhip)
         up    = np.cross(front, left)
@@ -622,19 +643,20 @@ class mesh_smpl_chart:
         front = math_normalize(front)
 
         center = (mhip + neck) * 0.5
+        length = np.linalg.norm(mhip - neck)
         points = np.vstack((lhip, mhip, rhip, neck))
         
-        return (left, up, front, center, points)
+        return (left, up, front, center, length, points)
     
-    def create_frame_body_center(self):
+    def _create_frame_body_center(self):
         lhip = self._joints[12:13, :]
         mhip = self._joints[8:9, :]
         rhip = self._joints[9:10, :]
         neck = self._joints[1:2, :]
 
-        return self._create_frame_body(lhip, mhip, rhip, neck)
+        return self._template_frame_body(lhip, mhip, rhip, neck)
 
-    def _create_frame_head(self, lear, rear, neck, nose):
+    def _template_frame_head(self, lear, rear, neck, nose):
         left  = lear - rear
         up    = lear - neck
         front = np.cross(left, up)
@@ -645,19 +667,20 @@ class mesh_smpl_chart:
         front = math_normalize(front)
 
         center = (nose + lear + rear) / 3
+        length = np.linalg.norm(neck - nose)
         points = np.vstack((lear, rear, neck, nose))
 
-        return (left, up, front, center, points)
+        return (left, up, front, center, length, points)
     
-    def create_frame_head_center(self):
+    def _create_frame_head_center(self):
         lear = self._joints[18:19, :]
         rear = self._joints[17:18, :]
         neck = self._joints[1:2, :]
         nose = self._joints[0:1, :]
 
-        return self._create_frame_head(lear, rear, neck, nose)
+        return self._template_frame_head(lear, rear, neck, nose)
     
-    def _create_frame_upper_arm(self, wrist, elbow, shoulder):
+    def _template_frame_upper_arm(self, wrist, elbow, shoulder):
         up    = shoulder - elbow
         left  = np.cross(up, wrist - elbow)
         front = np.cross(left, up)
@@ -667,25 +690,26 @@ class mesh_smpl_chart:
         front = math_normalize(front)
 
         center = (elbow + shoulder) * 0.5
+        length = np.linalg.norm(elbow - shoulder)
         points = np.vstack((shoulder, elbow))
 
-        return (left, up, front, center, points)
+        return (left, up, front, center, length, points)
 
-    def create_frame_upper_arm_left(self):
+    def _create_frame_upper_arm_left(self):
         wrist    = self._joints[7:8, :]
         elbow    = self._joints[6:7, :]
         shoulder = self._joints[5:6, :]
 
-        return self._create_frame_upper_arm(wrist, elbow, shoulder)
+        return self._template_frame_upper_arm(wrist, elbow, shoulder)
 
-    def create_frame_upper_arm_right(self):
+    def _create_frame_upper_arm_right(self):
         wrist    = self._joints[4:5, :]
         elbow    = self._joints[3:4, :]
         shoulder = self._joints[2:3, :]
 
-        return self._create_frame_upper_arm(wrist, elbow, shoulder)
+        return self._template_frame_upper_arm(wrist, elbow, shoulder)
 
-    def _create_frame_lower_arm(self, wrist, elbow, shoulder):
+    def _template_frame_lower_arm(self, wrist, elbow, shoulder):
         up = elbow - wrist
         left = np.cross(up, shoulder - elbow)
         front = np.cross(left, up)
@@ -695,23 +719,24 @@ class mesh_smpl_chart:
         front = math_normalize(front)
 
         center = (elbow + wrist) * 0.5
+        length = np.linalg.norm(elbow - wrist)
         points = np.vstack((wrist, elbow))
 
-        return (left, up, front, center, points)
+        return (left, up, front, center, length, points)
 
-    def create_frame_lower_arm_left(self):
+    def _create_frame_lower_arm_left(self):
         wrist    = self._joints[7:8, :]
         elbow    = self._joints[6:7, :]
         shoulder = self._joints[5:6, :]
 
-        return self._create_frame_lower_arm(wrist, elbow, shoulder)
+        return self._template_frame_lower_arm(wrist, elbow, shoulder)
 
-    def create_frame_lower_arm_right(self):
+    def _create_frame_lower_arm_right(self):
         wrist    = self._joints[4:5, :]
         elbow    = self._joints[3:4, :]
         shoulder = self._joints[2:3, :]
 
-        return self._create_frame_lower_arm(wrist, elbow, shoulder)
+        return self._template_frame_lower_arm(wrist, elbow, shoulder)
 
 
 #------------------------------------------------------------------------------
@@ -883,7 +908,7 @@ class renderer_scene_control:
 
     def render(self):
         color, depth = self._renderer.render(self._scene, pyrender.RenderFlags.RGBA)
-        return color, depth
+        return (color, depth)
 
     def group_item_add(self, group, name, item, pose=None):
         nodes = self._groups.get(group, dict())
@@ -936,6 +961,9 @@ class renderer_mesh_paint:
         self._brushes = dict()
         self._decals = dict()
         self._tasks = dict()
+
+    def set_background(self, background):
+        self._background = background
 
     def layer_create(self, layer_id):
         self._layers[layer_id] = np.zeros_like(self._render_target)
@@ -1011,47 +1039,15 @@ class renderer_mesh_paint:
 
 
 
+    
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# mesh
+# chart -> joints
+# mesh_paint -> one time
+# visual
 
 
 
@@ -1060,9 +1056,129 @@ class renderer:
     def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
         self._camera_transform = renderer_camera_transform(**settings_camera_transform)
         self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_lamp, self._camera_transform.get_transform_local())
+        self._smpl_meshes = dict()
+        self._smpl_render = dict()
 
-    def add_mesh(self, group, name):
+
+
+    def load_uv(self, filename_uv, texture_shape):
+        self._uv_transform, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
+        self._mesh_b_uvx = texture_uv_to_uvx(self._mesh_b_uv.copy(), texture_shape)
+        self._texture_shape = texture_shape
+
+    def smpl_set_mesh(self, name, vertices, joints, faces, texture, pose=None):
+        render = self._smpl_render.get(name, None)
+        if (render is None):
+            target = texture.copy()
+            visual = texture_create_visual(self._mesh_b_uv, target)
+            effect = renderer_mesh_paint(self._mesh_b_uvx, target, self._uv_transform, texture)
+            effect.layer_create(0)
+            effect.layer_enable(0, True)
+            self._smpl_render[name] = [visual, effect]
+        else:
+            visual, effect = render
+            effect.set_background(texture)
+        mesh_a_tri = mesh_create(vertices, faces)
+        mesh_b_tri = mesh_expand(mesh_a_tri, self._uv_transform, self._mesh_b_faces, visual)
+        mesh_b_pyr = mesh_to_renderer(mesh_b_tri)
+        mesh_a_map = mesh_smpl_chart(mesh_a_tri, joints)
+        self._scene_control.group_item_add('smpl', name, mesh_b_pyr, pose)
+        
+        self._smpl_meshes[name] = [mesh_a_tri, mesh_b_tri, mesh_b_pyr, mesh_a_map, pose]
+
+    def smpl_create_frame(self, name, region):
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        return chart.create_frame(region)
+    
+    def smpl_get_surface_point(self, name, frame, y, theta):
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        return chart.get_surface_point(frame, y, theta)
+
+    def smpl_raycast(self, name, origin, direction):
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        return mesh_raycast(mesh_a, origin, direction)
+
+    def smpl_closest(self, name, origin):
         pass
+
+    def smpl_paint_brush_solid(self, name, anchor, size, color, timeout=0.05, steps=1, tolerance=0):
+        visual, effect = self._smpl_render[name]
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        origin = anchor[0]
+        face_index = anchor[1]
+        effect.brush_create_solid(0, size, color, 0)
+        effect.task_create_paint_brush(0, mesh_a, mesh_b, face_index, origin, [0], tolerance)
+        effect.task_execute(0, timeout, steps)
+
+    def smpl_paint_brush_gradient(self):
+        pass
+
+    def smpl_paint_decal_solid(self):
+        pass
+
+    def smpl_paint_flush(self, name):
+        visual, effect = self._smpl_render[name]
+        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        effect.flush()
+        self._scene_control.group_item_add('smpl', name, mesh_to_renderer(mesh_b), pose)
+
+    def smpl_paint_clear(self, name):
+        visual, effect = self._smpl_render[name]
+        effect.layer_clear(0)
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+
+    
+    
+
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+
+        #()
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1075,8 +1191,8 @@ class renderer:
     def camera_get_transform_plane(self):
         return self._camera_transform.get_transform_plane()
     
-    def group_item_add(self, group, name, item, pose=None):
-        self._scene_control.group_item_add(group, name, item, pose)
+    #def group_item_add(self, group, name, item, pose=None):
+    #    self._scene_control.group_item_add(group, name, item, pose)
 
     def render(self):
         return self._scene_control.render()
