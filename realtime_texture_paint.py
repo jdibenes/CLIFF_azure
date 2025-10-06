@@ -19,8 +19,6 @@ from common.utils import strip_prefix_if_present, cam_crop2full
 # from common.mocap_dataset import MocapDataset  # not used in this live demo
 
 import mesh_solver
-
-
 import visualizer
 
 
@@ -73,9 +71,6 @@ def create_model(img_shape):
 # mesh_b = 7576 vertices 13776 faces 7576 uvs
 # same faces, duplicated vertices for vertices with multiple uv's
 
-
-
-
 class demo:
     def run(self, args):
         # Set up the webcam and offscreen pyrender renderer.
@@ -91,32 +86,26 @@ class demo:
         if ('color_intrinsics' in frame_data):
             print(f"color_intrinsics={frame_data['color_intrinsics']}")
 
-        frame = frame_data['color']        
-        self._device, self._cliff_model, self._bbox_info, self._smpl = create_model(frame.shape)
-        self._uv_transform, self._mesh_faces_b, self._mesh_uv_b = mesh_solver.texture_load_uv('./data/smpl_uv.obj')
-        tex_filename = './data/textures/f_01_alb.002_1k.png'
-        #tex_filename = './data/textures/smpl_uv_20200910.png'
-        self._texture_array = mesh_solver.texture_load_image(tex_filename)
-        self._bg_array = self._texture_array.copy()
-        self._mesh_visuals = mesh_solver.texture_create_visual(self._mesh_uv_b, self._texture_array)
-        self._mesh_uvx_b = mesh_solver.texture_uv_to_uvx(self._mesh_uv_b.copy(), self._texture_array.shape)
-        self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
-        #font = mesh_solver.texture_load_font('arial.ttf', 512)
-        #self._test_stamp = mesh_solver.texture_create_multiline_text(['Cut', 'Here'], font, (255, 0, 0, 255), (255, 255, 255, 255), 1, 20)
-        #self._test_stamp = mesh_solver.texture_pad(self._test_stamp, 0.05, 0.1, (255, 255, 255, 255))
-        
+        frame = frame_data['color']
+
         cfg_offscreen = mesh_solver.renderer_create_settings_offscreen(1280, 720)
         cfg_scene = mesh_solver.renderer_create_settings_scene()
-        #f = 700
         f = 1/(np.tan((np.pi / 3) / 2) / (720 / 2))
         cfg_camera = mesh_solver.renderer_create_settings_camera(f, f, 640, 360)
         cfg_camera_transform = mesh_solver.renderer_create_settings_camera_transform()
-        cfg_lamp = mesh_solver.renderer_create_settings_lamp(intensity=2.0)
+        cfg_lamp = mesh_solver.renderer_create_settings_lamp()
         self._offscreen_renderer = mesh_solver.renderer(cfg_offscreen, cfg_scene, cfg_camera, cfg_camera_transform, cfg_lamp)
-        self._mesh_painter = mesh_solver.renderer_mesh_paint(self._mesh_uvx_b, self._texture_array, self._uv_transform, self._bg_array)
-        self._mesh_painter.texture_attach(0, self._test_stamp)
-        self._mesh_painter.layer_create(0)
-        self._mesh_painter.layer_enable(0, True)
+        self._offscreen_renderer.load_uv('./data/smpl_uv.obj', [1024, 1024])
+
+        tex_filename = './data/textures/f_01_alb.002_1k.png'
+        #tex_filename = './data/textures/smpl_uv_20200910.png'
+        self._texture_array = mesh_solver.texture_load_image(tex_filename)
+        self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
+        font = mesh_solver.texture_load_font('arial.ttf', 512)
+        self._test_text = mesh_solver.texture_create_multiline_text(['Sample', 'Text'], font, (255, 0, 0, 255), (255, 255, 255, 255), 1, 20)
+        self._test_text = mesh_solver.texture_pad(self._test_text, 0.05, 0.1, (255, 255, 255, 255))
+        
+        self._device, self._cliff_model, self._bbox_info, self._smpl = create_model(frame.shape)
 
         # Initialize visualization utilities
         viewport_width, viewport_height = 1280, 720
@@ -129,7 +118,8 @@ class demo:
         self._joint_solver = joint_solver
         self._scene_control = scene_control
         self._regions = [
-            joint_solver.focus_center_whole,
+            #joint_solver.focus_center_whole,
+            joint_solver.focus_center_body,
             joint_solver.focus_right_lower_leg,
             joint_solver.focus_left_lower_leg,
         ]        
@@ -252,6 +242,7 @@ class demo:
         front  = rotation @ front
 
         point, face_index, vertex_index = self._joint_solver.face_solver(center, front)
+        #print([point, face_index, vertex_index])
         if (point is not None):
             distances = self._joint_solver.select_vertices(vertex_index, np.Inf, 3)
             selected_indices = distances.keys()
@@ -261,56 +252,46 @@ class demo:
         else:
             distances = None
             selected_indices = None
-
-        start_time = time.perf_counter()
-        mesh2 = mesh_solver.mesh_expand(mesh, self._uv_transform, self._mesh_faces_b, self._mesh_visuals)
-        end_time = time.perf_counter()
-        #print(f'MESH2 time {end_time-start_time}')
-
-        start_time = time.perf_counter()
-        #self._mesh_painter.brush_create_gradient(0, 0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, 0)
-        #self._mesh_painter.brush_create_solid(1, 0.02, np.array([0, 255, 0, 255], dtype=np.uint8), 0)
-        #self._mesh_painter.task_create_paint_brush(0, mesh, mesh2, face_index, point.T, [1, 0])
-        #self._mesh_painter.task_execute(0, 0.033)
-        end_time = time.perf_counter()
-        print(f'paint solid time {end_time-start_time} proc')
-
-        align_prior = np.array([[0, 1, 0]], dtype=np.float32)
-        align_normal = mesh.face_normals[face_index:(face_index+1), :]
-        #print(align_prior @ align_normal.T)
-        align_prior = align_prior - (align_normal @ align_prior.T) * align_normal
-        align_prior = align_prior / np.linalg.norm(align_prior)
-
-        start_time = time.perf_counter()
-        self._mesh_painter.decal_create_solid(0, align_prior, 0, 10000 * 2, 0, 0, False)
-        self._mesh_painter.task_create_paint_decal(0, mesh, mesh2, face_index, point.T, 0)
-        self._mesh_painter.task_execute(0, 0.033)
-        end_time = time.perf_counter()
-        print(f'paint image time {end_time-start_time} proc')
-
-        start_time = time.perf_counter()
-        self._mesh_painter.flush()
-        self._mesh_painter.layer_clear(0)
-        end_time = time.perf_counter()
-        print(f'flush image time {end_time-start_time} proc')
         
-        self._scene_control.set_smpl_mesh(mesh2)
+        self._scene_control.set_smpl_mesh(mesh)
         self._scene_control.clear_group('arrows')
 
         camera_pose[:3, 3:4] = (focus_center + 1.2 * axis_displacement * camera_pose[:3, 2:3])
         self._scene_control.set_camera_pose(camera_pose)
 
-        self._offscreen_renderer.group_item_add('smpl_meshes', 'mesh_test', mesh_solver.mesh_to_renderer(mesh2))
+        #print(anchor)
+        
         # TODO: full SO(3) to zero roll transform:
         #self._offscreen_renderer._camera_set_pose(camera_pose)
         use_offscreen = True
         use_plane = True
+        di = 0.02
+        da = (10/180) * np.pi
 
         while (use_offscreen):
+            self._offscreen_renderer.smpl_set_mesh('mesh_test', mesh.vertices, joints.T, mesh.faces, self._texture_array)
+            #vertex_index = mesh.faces[face_index][snap_index]
+            anchor = self._offscreen_renderer.smpl_get_surface_point('mesh_test', self._offscreen_renderer.smpl_create_frame('mesh_test', 'body_center'), displacement, angle)
+            #self._offscreen_renderer.smpl_paint_brush_solid('mesh_test', anchor, 0.02, np.array([0, 255, 0, 255], dtype=np.uint8))
+            #self._offscreen_renderer.smpl_paint_brush_gradient('mesh_test', anchor, 0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33)
+            #self._offscreen_renderer.smpl_paint_decal_solid('mesh_test', anchor, self._test_stamp, 0, 10000 * 2)
+            self._offscreen_renderer.smpl_paint_decal_solid('mesh_test', anchor, self._test_text, 0, 10000 * 2)
+            self._offscreen_renderer.smpl_paint_flush('mesh_test')
+            self._offscreen_renderer.smpl_paint_clear('mesh_test')
+
             color, _ = self._offscreen_renderer.render()
             #print(f'RENDER CHANNELS {color.shape}')
             cv2.imshow('offscreen test', cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
             key = cv2.waitKey(0) & 0xFF
+            if (key == 50): # 2
+                displacement += di
+            if (key == 51): # 3
+                displacement -= di
+            if (key == 52): # 4
+                angle += da
+            if (key == 53): # 5
+                angle -= da
+
             if (key == 68 or key == 100): # d
                 self._offscreen_renderer.camera_adjust(yaw=10)
             if (key == 65 or key == 97): # a
@@ -359,7 +340,7 @@ class demo:
                 else:
                     pose = self._offscreen_renderer.camera_get_pose()
                 self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 0])
-            if (key == 27):
+            if (key == 27): # esc
                 break
 
 
@@ -378,6 +359,50 @@ if __name__ == '__main__':
     main()
 
 
+
+
+#self._offscreen_renderer.group_item_add('smpl_meshes', 'mesh_test', mesh_solver.mesh_to_renderer(mesh2))
+#start_time = time.perf_counter()
+#mesh2 = mesh_solver.mesh_expand(mesh, self._uv_transform, self._mesh_faces_b, self._mesh_visuals)
+#end_time = time.perf_counter()
+#print(f'MESH2 time {end_time-start_time}')
+
+#start_time = time.perf_counter()
+#self._mesh_painter.brush_create_gradient(0, 0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, 0)
+#self._mesh_painter.brush_create_solid(1, 0.02, np.array([0, 255, 0, 255], dtype=np.uint8), 0)
+#self._mesh_painter.task_create_paint_brush(0, mesh, mesh2, face_index, point.T, [1, 0])
+#self._mesh_painter.task_execute(0, 0.033)
+#end_time = time.perf_counter()
+#print(f'paint solid time {end_time-start_time} proc')
+
+#align_prior = np.array([[0, 1, 0]], dtype=np.float32)
+#align_normal = mesh.face_normals[face_index:(face_index+1), :]
+#print(align_prior @ align_normal.T)
+#align_prior = align_prior - (align_normal @ align_prior.T) * align_normal
+#align_prior = align_prior / np.linalg.norm(align_prior)
+
+#start_time = time.perf_counter()
+#self._mesh_painter.decal_create_solid(0, align_prior, 0, 10000 * 2, 0, 0, False)
+#self._mesh_painter.task_create_paint_decal(0, mesh, mesh2, face_index, point.T, 0)
+#self._mesh_painter.task_execute(0, 0.033)
+#end_time = time.perf_counter()
+#print(f'paint image time {end_time-start_time} proc')
+
+#start_time = time.perf_counter()
+#self._mesh_painter.flush()
+#self._mesh_painter.layer_clear(0)
+#end_time = time.perf_counter()
+#print(f'flush image time {end_time-start_time} proc')
+
+#self._uv_transform, self._mesh_faces_b, self._mesh_uv_b = mesh_solver.texture_load_uv('./data/smpl_uv.obj')
+#self._bg_array = self._texture_array.copy()
+#self._mesh_visuals = mesh_solver.texture_create_visual(self._mesh_uv_b, self._texture_array)
+#self._mesh_uvx_b = mesh_solver.texture_uv_to_uvx(self._mesh_uv_b.copy(), self._texture_array.shape)
+#f = 700
+#self._mesh_painter = mesh_solver.renderer_mesh_paint(self._mesh_uvx_b, self._texture_array, self._uv_transform, self._bg_array)
+#self._mesh_painter.texture_attach(0, self._test_stamp)
+#self._mesh_painter.layer_create(0)
+#self._mesh_painter.layer_enable(0, True)
 '''
 def create_colormap():
     # Create colormap
