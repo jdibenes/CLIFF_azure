@@ -1036,7 +1036,8 @@ class renderer_mesh_paint:
 
 
 
-
+def mesh_create_cone(radius, height, sections):
+    return trimesh.creation.cone(radius=radius, height=height, sections=sections)
 
 
 
@@ -1087,6 +1088,8 @@ class renderer:
         self._smpl_meshes[name] = [mesh_a_tri, mesh_b_tri, mesh_b_pyr, mesh_a_map, pose]
 
 
+    def mesh_add(self, mesh, pose):
+        self._scene_control.group_item_add('arrow', 'cursor', mesh_to_renderer(mesh), pose)
 
 
     def smpl_create_frame(self, name, region):
