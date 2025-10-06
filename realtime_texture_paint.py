@@ -258,8 +258,6 @@ class demo:
 
         camera_pose[:3, 3:4] = (focus_center + 1.2 * axis_displacement * camera_pose[:3, 2:3])
         self._scene_control.set_camera_pose(camera_pose)
-
-        #print(anchor)
         
         # TODO: full SO(3) to zero roll transform:
         #self._offscreen_renderer._camera_set_pose(camera_pose)
@@ -268,19 +266,32 @@ class demo:
         di = 0.02
         da = (10/180) * np.pi
 
+
+        self._offscreen_renderer.smpl_set_mesh('mesh_test', mesh.vertices, joints.T, mesh.faces, self._texture_array)
+        cone = mesh_solver.mesh_create_cone(0.015, 0.04, 10)
+        I3 = np.eye(3, dtype=np.float32)
+        pose_cone =  np.eye(4, dtype=np.float32)
+        
+
         while (use_offscreen):
-            self._offscreen_renderer.smpl_set_mesh('mesh_test', mesh.vertices, joints.T, mesh.faces, self._texture_array)
             #vertex_index = mesh.faces[face_index][snap_index]
-            anchor = self._offscreen_renderer.smpl_get_surface_point('mesh_test', self._offscreen_renderer.smpl_create_frame('mesh_test', 'body_center'), displacement, angle)
+            smpl_frame = self._offscreen_renderer.smpl_create_frame('mesh_test', 'body_center')
+            anchor = self._offscreen_renderer.smpl_get_surface_point('mesh_test', smpl_frame, displacement, angle)
+            arrow_r = mesh_solver.geometry_solve_basis(I3[1:2, :], I3[2:3, :], smpl_frame[1], -anchor[5])
+            pose_cone[:3, :3] = arrow_r.T
+            pose_cone[:3, 3:4] = (anchor[0] + 0.04 * anchor[5]).T
+
+            self._offscreen_renderer.mesh_add(cone, pose_cone)
+
             #self._offscreen_renderer.smpl_paint_brush_solid('mesh_test', anchor, 0.02, np.array([0, 255, 0, 255], dtype=np.uint8))
             #self._offscreen_renderer.smpl_paint_brush_gradient('mesh_test', anchor, 0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33)
             #self._offscreen_renderer.smpl_paint_decal_solid('mesh_test', anchor, self._test_stamp, 0, 10000 * 2)
-            self._offscreen_renderer.smpl_paint_decal_solid('mesh_test', anchor, self._test_text, 0, 10000 * 2)
+            self._offscreen_renderer.smpl_paint_decal_solid('mesh_test', anchor, self._test_text, 0, 10000 * 2, timeout=0.1)
             self._offscreen_renderer.smpl_paint_flush('mesh_test')
             self._offscreen_renderer.smpl_paint_clear('mesh_test')
 
             color, _ = self._offscreen_renderer.render()
-            #print(f'RENDER CHANNELS {color.shape}')
+
             cv2.imshow('offscreen test', cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
             key = cv2.waitKey(0) & 0xFF
             if (key == 50): # 2
