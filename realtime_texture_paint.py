@@ -22,11 +22,6 @@ import mesh_solver
 import visualizer
 
 
-def mesh_raycast(mesh, origin, direction):
-    point, rid, tid = mesh.ray.intersects_location(origin, direction, multiple_hits=False)
-    return (point, tid[0]) if (len(rid) > 0) else (None, None)
-
-
 def preprocess_frame(frame, target_size=(224, 224)):
     """
     Preprocess the input frame (BGR) to a normalized tensor.
@@ -269,19 +264,35 @@ class demo:
 
         self._offscreen_renderer.smpl_set_mesh('mesh_test', mesh.vertices, joints.T, mesh.faces, self._texture_array)
         cone = mesh_solver.mesh_create_cone(0.015, 0.04, 10)
+        sphere = mesh_solver.mesh_create_sphere(0.002)
         I3 = np.eye(3, dtype=np.float32)
         pose_cone =  np.eye(4, dtype=np.float32)
+        pose_sphere = np.eye(4, dtype=np.float32)
+
         
 
         while (use_offscreen):
             #vertex_index = mesh.faces[face_index][snap_index]
             smpl_frame = self._offscreen_renderer.smpl_create_frame('mesh_test', 'body_center')
-            anchor = self._offscreen_renderer.smpl_get_surface_point('mesh_test', smpl_frame, displacement, angle)
-            arrow_r = mesh_solver.geometry_solve_basis(I3[1:2, :], I3[2:3, :], smpl_frame[1], -anchor[5])
-            pose_cone[:3, :3] = arrow_r.T
-            pose_cone[:3, 3:4] = (anchor[0] + 0.04 * anchor[5]).T
+            #anchor = self._offscreen_renderer.smpl_from_cylindrical('mesh_test', smpl_frame, displacement, angle)
+            anchor = self._offscreen_renderer.smpl_from_spherical('mesh_test', smpl_frame, angle, displacement)
+            #print(smpl_frame)
+            print(smpl_frame)
+            print([angle,displacement])
+            #print(self._offscreen_renderer.smpl_to_cylindrical('mesh_test', smpl_frame, anchor[0]))
+            print(self._offscreen_renderer.smpl_to_spherical('mesh_test', smpl_frame, anchor[0]))
 
-            self._offscreen_renderer.mesh_add(cone, pose_cone)
+            arrow_r = mesh_solver.geometry_solve_basis(I3[1:2, :], I3[2:3, :], smpl_frame[1], -anchor[4])
+            pose_cone[:3, :3] = arrow_r.T
+            pose_cone[:3, 3:4] = (anchor[0] + 0.04 * anchor[4]).T
+            
+
+            #print()
+
+            pose_sphere[:3, 3:4] = mesh_solver.mesh_closest(mesh, pose_cone[:3, 3:4].T)[0].T
+
+            self._offscreen_renderer.mesh_add('cursor', cone, pose_cone)
+            self._offscreen_renderer.mesh_add('closest', sphere, pose_sphere)
 
             #self._offscreen_renderer.smpl_paint_brush_solid('mesh_test', anchor, 0.02, np.array([0, 255, 0, 255], dtype=np.uint8))
             #self._offscreen_renderer.smpl_paint_brush_gradient('mesh_test', anchor, 0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33)
