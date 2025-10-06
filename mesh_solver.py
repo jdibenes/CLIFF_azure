@@ -22,7 +22,7 @@ from PIL import Image, ImageFont, ImageDraw
 # TODO: m == 0??
 def math_normalize(a):
     m = np.linalg.norm(a)
-    return a / m, m
+    return (a / m, m) # tuple return
 
 
 #------------------------------------------------------------------------------
@@ -69,7 +69,7 @@ def texture_load_uv(filename_uv):
     for face_index in range(0, mesh_faces_b.shape[0]):
         for vertex_index in range(0, 3):
             uv_transform[mesh_faces_b[face_index, vertex_index]] = mesh_faces_a[face_index, vertex_index]
-    return (uv_transform, mesh_faces_b, mesh_uv_b)
+    return (uv_transform, mesh_faces_b, mesh_uv_b) # tuple return
 
 
 def texture_load_font(font_name, font_size):
@@ -188,12 +188,12 @@ def mesh_expand(mesh, uv_transform, faces_extended, visual=None):
 
 def mesh_raycast(mesh, origin, direction):
     point, rid, tid = mesh.ray.intersects_location(origin, direction, multiple_hits=False)
-    return (point, tid[0]) if (len(rid) > 0) else (None, None)
+    return (point, tid[0]) if (len(rid) > 0) else (None, None) # tuple return
 
 
 def mesh_closest(mesh, origin):
     point, distance, tid = mesh.nearest.on_surface(origin)
-    return (point, distance[0], tid[0]) if (len(tid) > 0) else (None, None, None)
+    return (point, tid[0], distance[0]) if (len(tid) > 0) else (None, None, None) # tuple return
 
 
 def mesh_snap_to_vertex(mesh, point, face_index):
@@ -244,7 +244,7 @@ def mesh_select_complete_faces(mesh, vertex_indices):
                     face_indices_complete.add(face_index)
                     vertex_indices_complete.update(face_vertices)
     
-    return (face_indices_complete, vertex_indices_complete)
+    return (face_indices_complete, vertex_indices_complete) # tuple return
 
 
 def mesh_to_renderer(mesh):
@@ -527,6 +527,14 @@ def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, ori
 #------------------------------------------------------------------------------
 # Mesh Chart
 #------------------------------------------------------------------------------
+
+class smpl_mesh_chart_local:
+    def __init__(self):
+        self.left = left
+        self.up = up
+        self.front = front
+        
+    
 
 # TODO: remove hardcoded joints, adapt to normal SMPL joints
 class smpl_mesh_chart:
@@ -1054,6 +1062,7 @@ class renderer_mesh_paint:
                 self._render_target[:, :, :] = np.array(Image.alpha_composite(Image.fromarray(self._render_target), Image.fromarray(self._layers[key])))
         if (force_alpha is not None):
             self._render_target[:, :, 3] = force_alpha
+
 
 
 
