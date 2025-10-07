@@ -525,10 +525,10 @@ def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, ori
 
 
 #------------------------------------------------------------------------------
-# SMPL Chart
+# Mesh Chart
 #------------------------------------------------------------------------------
 
-class smpl_mesh_chart_frame:
+class mesh_chart_frame:
     def __init__(self, left, up, front, center, length, points):
         self.left = left
         self.up = up
@@ -538,7 +538,7 @@ class smpl_mesh_chart_frame:
         self.points = points
 
 
-class smpl_mesh_chart_point:
+class mesh_chart_point:
     def __init__(self, point, face_index, position, direction, orientation):
         self.point = point
         self.face_index = face_index
@@ -547,7 +547,7 @@ class smpl_mesh_chart_point:
         self.orientation = orientation
 
 
-class smpl_mesh_chart_local:
+class mesh_chart_local:
     def __init__(self, p1, p2, offset, nx, ny, nz, xz, nxz):
         self.p1 = p1
         self.p2 = p2
@@ -558,6 +558,10 @@ class smpl_mesh_chart_local:
         self.xz = xz
         self.nxz = nxz
 
+
+#------------------------------------------------------------------------------
+# SMPL Chart
+#------------------------------------------------------------------------------
 
 # TODO: remove hardcoded joints, adapt to normal SMPL joints
 class smpl_mesh_chart:
@@ -578,14 +582,14 @@ class smpl_mesh_chart:
         orientation = cv2.Rodrigues(frame.up * -yaw)[0]
         direction = frame.front @ orientation
         point, face_index = mesh_raycast(self._mesh, position, direction)
-        return smpl_mesh_chart_point(point, face_index, position, direction, orientation)
+        return mesh_chart_point(point, face_index, position, direction, orientation)
     
     def from_spherical(self, frame, yaw, pitch):
         position = frame.center
         orientation = cv2.Rodrigues(frame.left * pitch)[0] @ cv2.Rodrigues(frame.up * -yaw)[0]
         direction = frame.front @ orientation
         point, face_index = mesh_raycast(self._mesh, position, direction)
-        return smpl_mesh_chart_point(point, face_index, position, direction, orientation)
+        return mesh_chart_point(point, face_index, position, direction, orientation)
 
     def split_up(self, frame, point):
         offset = point - frame.center
@@ -594,20 +598,19 @@ class smpl_mesh_chart:
         nxz = np.linalg.norm(xz)
         nx = frame.left @ xz.T
         nz = frame.front @ xz.T
-        return (offset, nx, ny, nz, xz, nxz)
+        return (offset, nx, ny, nz, xz, nxz) # tuple return
 
     def to_cylindrical(self, frame, point):
         offset, nx, ny, nz, xz, nxz = self.split_up(frame, point)
         displacement = ny
         yaw = np.arctan2(nx, nz)
-        return smpl_mesh_chart_local(displacement, yaw, offset, nx, ny, nz, xz, nxz)
+        return mesh_chart_local(displacement, yaw, offset, nx, ny, nz, xz, nxz)
 
     def to_spherical(self, frame, point):
         offset, nx, ny, nz, xz, nxz = self.split_up(frame, point)
         yaw = np.arctan2(nx, nz)
         pitch = np.arctan2(ny, nxz)
-        return smpl_mesh_chart_local(yaw, pitch, offset, nx, ny, nz, xz, nxz)
-
+        return mesh_chart_local(yaw, pitch, offset, nx, ny, nz, xz, nxz)
 
     def _template_frame_foot(self, bigtoe, smalltoe, ankle, heel):
         left  = np.cross(ankle - heel, bigtoe - ankle)
@@ -622,7 +625,7 @@ class smpl_mesh_chart:
         length = np.linalg.norm(ankle - bigtoe)
         points = np.vstack((bigtoe, smalltoe, ankle, heel))
 
-        return smpl_mesh_chart_frame(left, up, front, center, length, points)
+        return mesh_chart_frame(left, up, front, center, length, points)
     
     def _create_frame_foot_left(self):
         bigtoe   = self._joints[19:20, :]
@@ -653,7 +656,7 @@ class smpl_mesh_chart:
         length = np.linalg.norm(ankle - knee)
         points = np.vstack((bigtoe, ankle, knee))
 
-        return smpl_mesh_chart_frame(left, up, front, center, length, points)
+        return mesh_chart_frame(left, up, front, center, length, points)
 
     def _create_frame_lower_leg_left(self):
         bigtoe = self._joints[19:20, :]
@@ -682,7 +685,7 @@ class smpl_mesh_chart:
         length = np.linalg.norm(hip - knee)
         points = np.vstack((knee, hip))
 
-        return smpl_mesh_chart_frame(left, up, front, center, length, points)
+        return mesh_chart_frame(left, up, front, center, length, points)
     
     def _create_frame_thigh_left(self):
         ankle = self._joints[14:15, :]
@@ -711,7 +714,7 @@ class smpl_mesh_chart:
         length = np.linalg.norm(mhip - neck)
         points = np.vstack((lhip, mhip, rhip, neck))
         
-        return smpl_mesh_chart_frame(left, up, front, center, length, points)
+        return mesh_chart_frame(left, up, front, center, length, points)
     
     def _create_frame_body_center(self):
         lhip = self._joints[12:13, :]
@@ -735,7 +738,7 @@ class smpl_mesh_chart:
         length = np.linalg.norm(neck - nose)
         points = np.vstack((lear, rear, neck, nose))
 
-        return smpl_mesh_chart_frame(left, up, front, center, length, points)
+        return mesh_chart_frame(left, up, front, center, length, points)
     
     def _create_frame_head_center(self):
         lear = self._joints[18:19, :]
@@ -758,7 +761,7 @@ class smpl_mesh_chart:
         length = np.linalg.norm(elbow - shoulder)
         points = np.vstack((shoulder, elbow))
 
-        return smpl_mesh_chart_frame(left, up, front, center, length, points)
+        return mesh_chart_frame(left, up, front, center, length, points)
 
     def _create_frame_upper_arm_left(self):
         wrist    = self._joints[7:8, :]
@@ -787,7 +790,7 @@ class smpl_mesh_chart:
         length = np.linalg.norm(elbow - wrist)
         points = np.vstack((wrist, elbow))
 
-        return smpl_mesh_chart_frame(left, up, front, center, length, points)
+        return mesh_chart_frame(left, up, front, center, length, points)
 
     def _create_frame_lower_arm_left(self):
         wrist    = self._joints[7:8, :]
@@ -973,7 +976,7 @@ class renderer_scene_control:
 
     def render(self):
         color, depth = self._renderer.render(self._scene, pyrender.RenderFlags.RGBA)
-        return (color, depth)
+        return (color, depth) # tuple return
 
     def group_item_add(self, group, name, item, pose=None):
         nodes = self._groups.get(group, dict())
@@ -1109,31 +1112,32 @@ class renderer_mesh_paint:
 
 
 
+
+
 def mesh_create_cone(radius, height, sections):
     return trimesh.creation.cone(radius=radius, height=height, sections=sections)
 
 def mesh_create_sphere(radius):
     return trimesh.creation.icosphere(radius=radius)
 
-    
 
 
 
 
-# mesh
-# chart -> joints
-# mesh_paint -> one time
-# visual
 
 
 
-# TODO: ...
+# TODO: smpl pose adjustments
 class renderer:
     def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
         self._camera_transform = renderer_camera_transform(**settings_camera_transform)
         self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_lamp, self._camera_transform.get_transform_local())
         self._smpl_meshes = dict()
         self._smpl_render = dict()
+        self._fb_width = settings_offscreen['viewport_width']
+        self._fb_height = settings_offscreen['viewport_height']
+        self._camera_fx = settings_camera['fx']
+        self._camera_fy = settings_camera['fy']
 
 
 
@@ -1142,7 +1146,7 @@ class renderer:
         self._mesh_b_uvx = texture_uv_to_uvx(self._mesh_b_uv.copy(), texture_shape)
         self._texture_shape = texture_shape
 
-    def smpl_set_mesh(self, name, vertices, joints, faces, texture, pose=None):
+    def smpl_mesh_set(self, name, vertices, joints, faces, texture, pose=np.eye(4, dtype=np.float32)):
         render = self._smpl_render.get(name, None)
         if (render is None):
             target = texture.copy()
@@ -1158,122 +1162,81 @@ class renderer:
         mesh_b_tri = mesh_expand(mesh_a_tri, self._uv_transform, self._mesh_b_faces, visual)
         mesh_b_pyr = mesh_to_renderer(mesh_b_tri)
         mesh_a_map = smpl_mesh_chart(mesh_a_tri, joints)
-        self._scene_control.group_item_add('smpl', name, mesh_b_pyr, pose)        
-        self._smpl_meshes[name] = [mesh_a_tri, mesh_b_tri, mesh_b_pyr, mesh_a_map, pose]
-
-
-    def mesh_add(self, name, mesh, pose):
-        self._scene_control.group_item_add('arrow', name, mesh_to_renderer(mesh), pose)
-
-
+        self._scene_control.group_item_add('smpl', name, mesh_b_pyr, pose)
+        self._smpl_meshes[name] = [mesh_a_tri, mesh_b_tri, mesh_a_map, pose]
 
     def smpl_chart_create_frame(self, name, region):
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]  # TODO: pose
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]  # TODO: pose
         return chart.create_frame(region)
     
-    def smpl_chart_from_cylindrical(self, name, frame, displacement, yaw) -> smpl_mesh_chart_point: 
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
+    def smpl_chart_from_cylindrical(self, name, frame, displacement, yaw) -> mesh_chart_point: 
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
         return chart.from_cylindrical(frame, displacement, yaw)
     
-    def smpl_chart_from_spherical(self, name, frame, yaw, pitch) -> smpl_mesh_chart_point:
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
+    def smpl_chart_from_spherical(self, name, frame, yaw, pitch) -> mesh_chart_point:
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
         return chart.from_spherical(frame, yaw, pitch)
     
-    def smpl_chart_to_cylindrical(self, name, frame, point) -> smpl_mesh_chart_local:
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
+    def smpl_chart_to_cylindrical(self, name, frame, point) -> mesh_chart_local:
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
         return chart.to_cylindrical(frame, point)
     
-    def smpl_chart_to_spherical(self, name, frame, point) -> smpl_mesh_chart_local:
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
+    def smpl_chart_to_spherical(self, name, frame, point) -> mesh_chart_local:
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
         return chart.to_spherical(frame, point)
 
-    
-    
-    
-    
-
-
-
-
-
-    def smpl_raycast(self, name, origin, direction):
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
+    def smpl_operation_raycast(self, name, origin, direction) -> mesh_chart_point:
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
         point, face_index = mesh_raycast(mesh_a, origin, direction)
+        return mesh_chart_point(point, face_index, origin, direction, None)
 
-    def smpl_closest(self, name, origin):  # TODO: pose
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name] # TODO: pose
+    def smpl_operation_closest(self, name, origin) -> mesh_chart_point:
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
         point, face_index = mesh_closest(mesh_a, origin)
-
-
-
-
+        return mesh_chart_point(point, face_index, origin, None, None)
+    
     def smpl_paint_brush_solid(self, name, anchor, size, color, timeout=0.05, steps=1, tolerance=0):
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         visual, effect = self._smpl_render[name]
         effect.brush_create_solid(0, size, color, 0)
         effect.task_create_paint_brush(0, mesh_a, mesh_b, anchor.face_index, anchor.point, [0], tolerance)
         effect.task_execute(0, timeout, steps)
+        return effect.task_done(0)
 
     def smpl_paint_brush_gradient(self, name, anchor, size, color_center, color_edge, hardness, timeout=0.05, steps=1, tolerance=0):
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         visual, effect = self._smpl_render[name]
         effect.brush_create_gradient(1, size, color_center, color_edge, hardness, 0)
         effect.task_create_paint_brush(1, mesh_a, mesh_b, anchor.face_index, anchor.point, [1], tolerance)
         effect.task_execute(1, timeout, steps)
-
-
-
-
-
-
-
-    def smpl_paint_decal_solid(self, name, anchor, decal, angle, scale, double_cover_test=True, timeout=0.05, steps=1, tolerance_decal=0, tolerance_paint=0):
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        return effect.task_done(1)
+    
+    def smpl_paint_decal_solid(self, name, anchor, decal, align_prior, angle, scale, double_cover_test=True, timeout=0.05, steps=1, tolerance_decal=0, tolerance_paint=0):
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         visual, effect = self._smpl_render[name]
-        face_index = anchor.face_index
-        
-        align_normal = mesh_a.face_normals[face_index:(face_index+1), :]
-        align_prior = align_normal.copy()
-        align_prior[:, :] = [0, 1, 0]
-        align_prior = math_normalize(align_prior - (align_normal @ align_prior.T) * align_normal)[0]
-
         effect.texture_attach(0, decal)
         effect.decal_create_solid(0, align_prior, angle, scale, 0, 0, double_cover_test, tolerance_decal)
-        effect.task_create_paint_decal(2, mesh_a, mesh_b, face_index, anchor.point, 0, tolerance_paint)
+        effect.task_create_paint_decal(2, mesh_a, mesh_b, anchor.face_index, anchor.point, 0, tolerance_paint)
         effect.task_execute(2, timeout, steps)
+        return effect.task_done(2)
+    
+    def smpl_paint_decal_align_prior(self, name, anchor, align_axis):
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
+        align_normal = mesh_a.face_normals[anchor.face_index:(anchor.face_index+1), :]
+        align_prior = math_normalize(align_axis - (align_normal @ align_axis.T) * align_normal)[0]
+        return align_prior
 
     def smpl_paint_flush(self, name):
         visual, effect = self._smpl_render[name]
-        mesh_a, mesh_b, mesh_p, chart, pose = self._smpl_meshes[name]
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         effect.flush()
-        self._scene_control.group_item_add('smpl', name, mesh_to_renderer(mesh_b), pose)
+        mesh_p = mesh_to_renderer(mesh_b)
+        self._scene_control.group_item_add('smpl', name, mesh_p, pose)
 
     def smpl_paint_clear(self, name):
         visual, effect = self._smpl_render[name]
         effect.layer_clear(0)
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-
-    
-    
 
 
 
@@ -1281,32 +1244,16 @@ class renderer:
 
 
 
-
-        
-
-
-
-
-
-
-
-        
-
-        #()
-
-
-
-    
-
-
-
-
-
-
-
-
-
-
+    def camera_focus_chart_frame(self, frame):
+        pose = self._camera_transform.get_transform_plane()
+        x = pose[:3, 0:1]
+        y = pose[:3, 1:2]
+        z = pose[:3, ]
+        wz = geometry_solve_fov_z(self._fb_width, self._fb_height, self._camera_fx, self._camera_fy, x, y, z, frame.center, frame.points)
+        self._camera_transform.set_center(frame.center)
+        self._camera_transform.set_distance(wz)
+        print(wz)
+        self._camera_set_pose(self._camera_transform.get_transform_local())
 
 
 
@@ -1319,9 +1266,6 @@ class renderer:
     
     def camera_get_transform_plane(self):
         return self._camera_transform.get_transform_plane()
-    
-    #def group_item_add(self, group, name, item, pose=None):
-    #    self._scene_control.group_item_add(group, name, item, pose)
 
     def render(self):
         return self._scene_control.render()
@@ -1348,6 +1292,31 @@ class renderer:
             else:
                 self._camera_transform.set_center(center)
         self._camera_set_pose(self._camera_transform.get_transform_local())
+
+
+
+
+
+
+
+
+
+
+
+
+
+           
+    
+
+    
+
+    
+    
+    def mesh_add(self, name, mesh, pose):
+        self._scene_control.group_item_add('arrow', name, mesh_to_renderer(mesh), pose)
+
+
+    
 
 
 
