@@ -254,13 +254,10 @@ class demo:
         camera_pose[:3, 3:4] = (focus_center + 1.2 * axis_displacement * camera_pose[:3, 2:3])
         self._scene_control.set_camera_pose(camera_pose)
         
-        # TODO: full SO(3) to zero roll transform:
-        #self._offscreen_renderer._camera_set_pose(camera_pose)
         use_offscreen = True
         use_plane = True
         di = 0.02
         da = (10/180) * np.pi
-
 
         self._offscreen_renderer.smpl_mesh_set('mesh_test', mesh.vertices, joints.T, mesh.faces, self._texture_array)
         cone = mesh_solver.mesh_create_cone(0.015, 0.04, 10)
@@ -269,13 +266,11 @@ class demo:
         pose_cone =  np.eye(4, dtype=np.float32)
         pose_sphere = np.eye(4, dtype=np.float32)
 
-
-        
-
         while (use_offscreen):
             #vertex_index = mesh.faces[face_index][snap_index]
             smpl_frame = self._offscreen_renderer.smpl_chart_create_frame('mesh_test', 'body_center')
-            self._offscreen_renderer.camera_focus_chart_frame(smpl_frame)
+            wz = self._offscreen_renderer.camera_solve_fov_z(smpl_frame.center, smpl_frame.points)
+            self._offscreen_renderer.camera_adjust(center=smpl_frame.center, distance=wz, relative=False)
             anchor = self._offscreen_renderer.smpl_chart_from_cylindrical('mesh_test', smpl_frame, displacement, angle)
             #anchor = self._offscreen_renderer.smpl_chart_from_spherical('mesh_test', smpl_frame, angle, displacement)
             #print(smpl_frame)
@@ -306,7 +301,7 @@ class demo:
             self._offscreen_renderer.smpl_paint_flush('mesh_test')
             self._offscreen_renderer.smpl_paint_clear('mesh_test')
 
-            color, _ = self._offscreen_renderer.render()
+            color, _ = self._offscreen_renderer.scene_render()
 
             cv2.imshow('offscreen test', cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
             key = cv2.waitKey(0) & 0xFF
@@ -335,37 +330,37 @@ class demo:
                 if (use_plane):
                     pose = self._offscreen_renderer.camera_get_transform_plane()
                 else:
-                    pose = self._offscreen_renderer.camera_get_pose()
+                    pose = self._offscreen_renderer.camera_get_transform_local()
                 self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 1])
             if (key == 74 or key == 106): #j
                 if (use_plane):
                     pose = self._offscreen_renderer.camera_get_transform_plane()
                 else:
-                    pose = self._offscreen_renderer.camera_get_pose()
+                    pose = self._offscreen_renderer.camera_get_transform_local()
                 self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 1])
             if (key == 73 or key == 105): #i
                 if (use_plane):
                     pose = self._offscreen_renderer.camera_get_transform_plane()
                 else:
-                    pose = self._offscreen_renderer.camera_get_pose()
+                    pose = self._offscreen_renderer.camera_get_transform_local()
                 self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 2])
             if (key == 75 or key == 107): #k
                 if (use_plane):
                     pose = self._offscreen_renderer.camera_get_transform_plane()
                 else:
-                    pose = self._offscreen_renderer.camera_get_pose()
+                    pose = self._offscreen_renderer.camera_get_transform_local()
                 self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 2])
             if (key == 78 or key == 110): #n
                 if (use_plane):
                     pose = self._offscreen_renderer.camera_get_transform_plane()
                 else:
-                    pose = self._offscreen_renderer.camera_get_pose()
+                    pose = self._offscreen_renderer.camera_get_transform_local()
                 self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 0])
             if (key == 77 or key == 109): #m
                 if (use_plane):
                     pose = self._offscreen_renderer.camera_get_transform_plane()
                 else:
-                    pose = self._offscreen_renderer.camera_get_pose()
+                    pose = self._offscreen_renderer.camera_get_transform_local()
                 self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 0])
             if (key == 27): # esc
                 break
