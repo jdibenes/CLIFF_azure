@@ -1301,6 +1301,3 @@ SMPL Joints
 '''
 # global transform
 #p[:3, 3:4] = (center + wz * z)
-#self._camera_transform.set_center(center)
-#self._camera_transform.set_distance(wz)
-#self._camera_set_pose(self._camera_transform.get_transform_local())
