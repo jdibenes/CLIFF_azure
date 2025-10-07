@@ -326,6 +326,7 @@ class mesh_neighborhood_processor:
 # Mesh Painting
 #------------------------------------------------------------------------------
 
+# TODO: THIS DISTANCE IS NOT GEODESIC
 class mesh_neighborhood_operation_brush:
     def __init__(self, mesh_vertices, mesh_faces, mesh_uvx, origin, targets, tolerance=0):
         self._mesh_vertices = mesh_vertices
@@ -343,7 +344,6 @@ class mesh_neighborhood_operation_brush:
         return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
     
     def _paint_uv(self, pixels, weights):
-        # TODO: THIS DISTANCE IS NOT GEODESIC
         distances = np.linalg.norm((weights @ self._simplex_3d) - self._origin, axis=1)
         self._pixels_painted = 0
         for target in self._targets:
@@ -409,6 +409,7 @@ class paint_brush_gradient:
         return pixels_painted
 
 
+# TODO: THIS UNWRAPPING METHOD IS AFFECTED BY THE ORDER IN WHICH FACES ARE PROCESSED
 class paint_decal_solid:
     def __init__(self, align_prior, angle, scale, image_buffer, render_buffer, double_cover_test=True, tolerance=0):
         self._align_prior = align_prior
@@ -459,7 +460,6 @@ class paint_decal_solid:
         return mesh_neighborhood_processor_command.EXPAND
 
     def _unwrap(self, mesh_vertices, face_normal, origin, indices_vertices, indices_uvx, pixels_dst, weights_src, level):
-        # TODO: THIS UNWRAPPING METHOD IS AFFECTED BY THE ORDER IN WHICH FACES ARE PROCESSED
         unwrapped = self._image_uvx[indices_uvx, 2] == 0
         unwrapped_count = unwrapped.sum()
 
@@ -954,7 +954,7 @@ class renderer_camera_transform:
 
 
 class renderer_scene_control:
-    def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_lamp, pose=np.eye(4, dtype=np.float32)):
+    def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_lamp, pose=None):
         self._renderer = pyrender.OffscreenRenderer(**settings_offscreen)
         self._scene = pyrender.Scene(**settings_scene)
         self._camera = pyrender.IntrinsicsCamera(**settings_camera)
@@ -983,8 +983,6 @@ class renderer_scene_control:
         previous = nodes.get(name, None)
         if (previous is not None):
             self._scene.remove_node(previous)
-        if (pose is None):
-            pose = np.eye(4, dtype=self._camera_pose.dtype)
         nodes[name] = self._scene.add(item, 'external@' + group + '@' + name, pose)
         self._groups[group] = nodes
 
@@ -1092,41 +1090,6 @@ class renderer_mesh_paint:
             self._render_target[:, :, 3] = force_alpha
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def mesh_create_cone(radius, height, sections):
-    return trimesh.creation.cone(radius=radius, height=height, sections=sections)
-
-def mesh_create_sphere(radius):
-    return trimesh.creation.icosphere(radius=radius)
-
-
-
-
-
-
-
-
 # TODO: smpl pose adjustments
 class renderer:
     def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
@@ -1134,17 +1097,18 @@ class renderer:
         self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_lamp, self._camera_transform.get_transform_local())
         self._smpl_meshes = dict()
         self._smpl_render = dict()
-        self._fb_width = settings_offscreen['viewport_width']
-        self._fb_height = settings_offscreen['viewport_height']
+        self._viewport_width = settings_offscreen['viewport_width']
+        self._viewport_height = settings_offscreen['viewport_height']
         self._camera_fx = settings_camera['fx']
         self._camera_fy = settings_camera['fy']
-
-
 
     def load_uv(self, filename_uv, texture_shape):
         self._uv_transform, self._mesh_a_faces, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
         self._mesh_b_uvx = texture_uv_to_uvx(self._mesh_b_uv.copy(), texture_shape)
         self._texture_shape = texture_shape
+
+    def scene_render(self):
+        return self._scene_control.render()
 
     def smpl_mesh_set(self, name, vertices, joints, faces, texture, pose=np.eye(4, dtype=np.float32)):
         render = self._smpl_render.get(name, None)
@@ -1165,33 +1129,36 @@ class renderer:
         self._scene_control.group_item_add('smpl', name, mesh_b_pyr, pose)
         self._smpl_meshes[name] = [mesh_a_tri, mesh_b_tri, mesh_a_map, pose]
 
+    def smpl_mesh_clear(self, name):
+        self._scene_control.group_item_remove('smpl', name)
+
     def smpl_chart_create_frame(self, name, region):
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]  # TODO: pose
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         return chart.create_frame(region)
     
     def smpl_chart_from_cylindrical(self, name, frame, displacement, yaw) -> mesh_chart_point: 
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         return chart.from_cylindrical(frame, displacement, yaw)
     
     def smpl_chart_from_spherical(self, name, frame, yaw, pitch) -> mesh_chart_point:
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         return chart.from_spherical(frame, yaw, pitch)
     
     def smpl_chart_to_cylindrical(self, name, frame, point) -> mesh_chart_local:
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         return chart.to_cylindrical(frame, point)
     
     def smpl_chart_to_spherical(self, name, frame, point) -> mesh_chart_local:
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         return chart.to_spherical(frame, point)
 
     def smpl_operation_raycast(self, name, origin, direction) -> mesh_chart_point:
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         point, face_index = mesh_raycast(mesh_a, origin, direction)
         return mesh_chart_point(point, face_index, origin, direction, None)
 
     def smpl_operation_closest(self, name, origin) -> mesh_chart_point:
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name] # TODO: pose
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
         point, face_index = mesh_closest(mesh_a, origin)
         return mesh_chart_point(point, face_index, origin, None, None)
     
@@ -1237,122 +1204,72 @@ class renderer:
         visual, effect = self._smpl_render[name]
         effect.layer_clear(0)
 
-
-
-
-
-
-
-
-    def camera_focus_chart_frame(self, frame):
-        pose = self._camera_transform.get_transform_plane()
+    def camera_solve_fov_z(self, center, points, plane=False):
+        pose = self._camera_transform.get_transform_local() if (not plane) else self._camera_transform.get_transform_plane()
         x = pose[:3, 0:1]
         y = pose[:3, 1:2]
-        z = pose[:3, ]
-        wz = geometry_solve_fov_z(self._fb_width, self._fb_height, self._camera_fx, self._camera_fy, x, y, z, frame.center, frame.points)
-        self._camera_transform.set_center(frame.center)
-        self._camera_transform.set_distance(wz)
-        print(wz)
-        self._camera_set_pose(self._camera_transform.get_transform_local())
+        z = pose[:3, 2:3]
+        wz = geometry_solve_fov_z(self._viewport_width, self._viewport_height, self._camera_fx, self._camera_fy, x, y, z, center, points)
+        return wz
 
-
-
-
-    def _camera_set_pose(self, pose):
-        self._scene_control.camera_set_pose(pose)
-
-    def camera_get_pose(self):
-        return self._scene_control.camera_get_pose()
-    
     def camera_get_transform_plane(self):
         return self._camera_transform.get_transform_plane()
-
-    def render(self):
-        return self._scene_control.render()
+    
+    def camera_get_transform_local(self):
+        return self._camera_transform.get_transform_local()
     
     def camera_adjust(self, yaw=None, pitch=None, distance=None, center=None, relative=True):
-        if (yaw is not None):
-            if (relative):
+        if (relative):
+            if (yaw is not None):
                 self._camera_transform.update_yaw(yaw)
-            else:
-                self._camera_transform.set_yaw(yaw)
-        if (pitch is not None):
-            if (relative):
+            if (pitch is not None):
                 self._camera_transform.update_pitch(pitch)
-            else:
-                self._camera_transform.set_pitch(pitch)
-        if (distance is not None):
-            if (relative):
+            if (distance is not None):
                 self._camera_transform.update_distance(distance)
-            else:
-                self._camera_transform.set_distance(distance)
-        if (center is not None):
-            if (relative):
+            if (center is not None):
                 self._camera_transform.update_center(center)
-            else:
+        else:
+            if (yaw is not None):
+                self._camera_transform.set_yaw(yaw)
+            if (pitch is not None):
+                self._camera_transform.set_pitch(pitch)
+            if (distance is not None):
+                self._camera_transform.set_distance(distance)
+            if (center is not None):
                 self._camera_transform.set_center(center)
-        self._camera_set_pose(self._camera_transform.get_transform_local())
+        
+        pose = self._camera_transform.get_transform_local()
+        self._scene_control.camera_set_pose(pose)
 
+    def camera_get_parameters(self):
+        yaw = self._camera_transform.get_yaw()
+        pitch = self._camera_transform.get_pitch()
+        distance = self._camera_transform.get_distance()
+        center = self._camera_transform.get_center()
+        tc = self._camera_transform.get_matrix_center()
+        ry = self._camera_transform.get_matrix_yaw()
+        rx = self._camera_transform.get_matrix_pitch()
+        tz = self._camera_transform.get_matrix_distance()
+        return (yaw, pitch, distance, center, tc, ry, rx, tz)
 
-
-
-
-
-
-
-
-
-
-
-
-           
-    
-
-    
-
-    
-    
     def mesh_add(self, name, mesh, pose):
         self._scene_control.group_item_add('arrow', name, mesh_to_renderer(mesh), pose)
 
+    def mesh_remove(self, name):
+        self._scene_control.group_item_remove('arrow', name)
+
 
     
 
 
 
 
-
-
-# global transform
-#p[:3, 3:4] = (center + wz * z)
-#self._mesh_a = mesh_a # changes every iteration
-#self._mesh_b = mesh_b # changes every iteration
-
-#, settings_camera_transform
-#self._camera_transform = renderer_camera_transform(**settings_camera_transform)
-
-
-
-
-def camera_get_parameters(self):
-    yaw = self._camera_transform.get_yaw()
-    pitch = self._camera_transform.get_pitch()
-    distance = self._camera_transform.get_distance()
-    center = self._camera_transform.get_center()
-    tc = self._camera_transform.get_matrix_center()
-    ry = self._camera_transform.get_matrix_yaw()
-    rx = self._camera_transform.get_matrix_pitch()
-    tz = self._camera_transform.get_matrix_distance()
-    return (yaw, pitch, distance, center, tc, ry, rx, tz)
-
     
+def mesh_create_cone(radius, height, sections):
+    return trimesh.creation.cone(radius=radius, height=height, sections=sections)
 
-
-
-
-
-
-
+def mesh_create_sphere(radius):
+    return trimesh.creation.icosphere(radius=radius)
 
 
 '''
@@ -1382,4 +1299,8 @@ SMPL Joints
 22: 'left_hand',
 23: 'right_hand'
 '''
-
+# global transform
+#p[:3, 3:4] = (center + wz * z)
+#self._camera_transform.set_center(center)
+#self._camera_transform.set_distance(wz)
+#self._camera_set_pose(self._camera_transform.get_transform_local())
