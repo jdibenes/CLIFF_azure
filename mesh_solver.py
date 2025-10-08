@@ -559,15 +559,9 @@ class mesh_chart_local:
         self.nxz = nxz
 
 
-#------------------------------------------------------------------------------
-# SMPL Chart
-#------------------------------------------------------------------------------
-
-# TODO: remove hardcoded joints, adapt to normal SMPL joints
-class smpl_mesh_chart:
-    def __init__(self, mesh, joints):
+class mesh_chart:
+    def __init__(self, mesh):
         self._mesh = mesh
-        self._joints = joints
         self._cache = dict()
 
     def create_frame(self, region):
@@ -591,7 +585,7 @@ class smpl_mesh_chart:
         point, face_index = mesh_raycast(self._mesh, position, direction)
         return mesh_chart_point(point, face_index, position, direction, orientation)
 
-    def split_up(self, frame, point):
+    def _split_up(self, frame, point):
         offset = point - frame.center
         ny = offset @ frame.up.T
         xz = offset - ny * frame.up
@@ -601,16 +595,27 @@ class smpl_mesh_chart:
         return (offset, nx, ny, nz, xz, nxz) # tuple return
 
     def to_cylindrical(self, frame, point):
-        offset, nx, ny, nz, xz, nxz = self.split_up(frame, point)
+        offset, nx, ny, nz, xz, nxz = self._split_up(frame, point)
         displacement = ny
         yaw = np.arctan2(nx, nz)
         return mesh_chart_local(displacement, yaw, offset, nx, ny, nz, xz, nxz)
 
     def to_spherical(self, frame, point):
-        offset, nx, ny, nz, xz, nxz = self.split_up(frame, point)
+        offset, nx, ny, nz, xz, nxz = self._split_up(frame, point)
         yaw = np.arctan2(nx, nz)
         pitch = np.arctan2(ny, nxz)
         return mesh_chart_local(yaw, pitch, offset, nx, ny, nz, xz, nxz)
+
+
+#------------------------------------------------------------------------------
+# SMPL Chart
+#------------------------------------------------------------------------------
+
+# TODO: remove hardcoded joints, adapt to normal SMPL joints
+class smpl_mesh_chart(mesh_chart):
+    def __init__(self, mesh, joints):
+        super().__init__(mesh)
+        self._joints = joints
 
     def _template_frame_foot(self, bigtoe, smalltoe, ankle, heel):
         left  = np.cross(ankle - heel, bigtoe - ankle)
@@ -808,7 +813,7 @@ class smpl_mesh_chart:
 
 
 #------------------------------------------------------------------------------
-# Rendering
+# Rendering Components
 #------------------------------------------------------------------------------
 
 def renderer_create_settings_offscreen(width, height, point_size=1):
@@ -973,6 +978,9 @@ class renderer_scene_control:
 
     def camera_get_pose(self):
         return self._camera_pose
+    
+    def camera_get_projection_matrix(self, width, height):
+        return self._camera.get_projection_matrix(width, height)
 
     def render(self):
         color, depth = self._renderer.render(self._scene, pyrender.RenderFlags.RGBA)
@@ -1089,6 +1097,10 @@ class renderer_mesh_paint:
         if (force_alpha is not None):
             self._render_target[:, :, 3] = force_alpha
 
+
+#------------------------------------------------------------------------------
+# Renderer
+#------------------------------------------------------------------------------
 
 # TODO: smpl pose adjustments
 class renderer:
@@ -1260,6 +1272,15 @@ class renderer:
 
 
     
+
+
+
+
+
+
+
+
+
 
 
 
