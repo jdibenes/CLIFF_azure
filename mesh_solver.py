@@ -34,7 +34,7 @@ def geometry_solve_basis(vas, vbs, vad, vbd):
     return np.linalg.inv(np.vstack((vas, vbs, np.cross(vas, vbs)))) @ np.vstack((vad, vbd, np.cross(vad, vbd)))
 
 
-def geometry_solve_fov_z(width, height, fx, fy, x, y, z, center, points):
+def geometry_solve_fov_z(width, height, fx, fy, cx, cy, x, y, z, center, points):
     dp = (points - center)
     dx = np.abs(dp @ x)
     dy = np.abs(dp @ y)
@@ -865,6 +865,18 @@ def renderer_create_settings_camera_transform(center=np.array([0, 0, 0], np.floa
     return s
 
 
+class renderer_camera_transform_parameters:
+    def __init__(self, yaw, pitch, distance, center, tc, ry, rx, tz):
+        self.yaw = yaw
+        self.pitch = pitch
+        self.distance = distance
+        self.center = center
+        self.tc = tc
+        self.ry = ry
+        self.rx = rx
+        self.tz = tz
+
+
 class renderer_camera_transform:
     def __init__(self, center, yaw, pitch, distance, min_pitch, max_pitch, znear, zfar):
         self._min_pitch = min_pitch
@@ -927,6 +939,26 @@ class renderer_camera_transform:
     def update_center(self, delta):
         self.set_center(self._center + delta)
 
+    def adjust_parameters(self, yaw=None, pitch=None, distance=None, center=None, relative=True):
+        if (relative):
+            if (yaw is not None):
+                self.update_yaw(yaw)
+            if (pitch is not None):
+                self.update_pitch(pitch)
+            if (distance is not None):
+                self.update_distance(distance)
+            if (center is not None):
+                self.update_center(center)
+        else:
+            if (yaw is not None):
+                self.set_yaw(yaw)
+            if (pitch is not None):
+                self.set_pitch(pitch)
+            if (distance is not None):
+                self.set_distance(distance)
+            if (center is not None):
+                self.set_center(center)
+
     def get_matrix_center(self):
         return self._tc
 
@@ -938,6 +970,9 @@ class renderer_camera_transform:
     
     def get_matrix_distance(self):
         return self._tz
+    
+    def get_parameters(self):
+        return renderer_camera_transform_parameters(self._yaw, self._pitch, self._distance, self._center, self._tc, self._ry, self._rx, self._tz)
 
     def _update(self):
         if (self._dirty):
@@ -956,31 +991,67 @@ class renderer_camera_transform:
     def get_transform_plane(self):
         self._update()
         return self._plane_pose
+    
+    def move_center(self, delta_xyz, plane=True):
+        self._update()
+        pose = self._local_pose if (not plane) else self._plane_pose
+        center = delta_xyz[0] * pose[:3, 0] + delta_xyz[1] * pose[:3, 1] + delta_xyz[2] * pose[:3, 2]
+        self.update_center(center)
 
 
 class renderer_scene_control:
-    def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_lamp, pose=None):
+    def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
         self._renderer = pyrender.OffscreenRenderer(**settings_offscreen)
         self._scene = pyrender.Scene(**settings_scene)
         self._camera = pyrender.IntrinsicsCamera(**settings_camera)
+        self._camera_transform = renderer_camera_transform(**settings_camera_transform)
         self._light = pyrender.DirectionalLight(**settings_lamp)
         self._groups = dict()
-        self._camera_pose = pose
+        self._camera_pose = self._camera_transform.get_transform_local()
 
         self._node_camera = self._scene.add(self._camera, 'internal@main@camera', self._camera_pose)
         self._node_light = self._scene.add(self._light, 'internal@main@lamp', self._camera_pose)
 
-    def camera_set_pose(self, camera_pose):
+    def _camera_set_pose(self, camera_pose):
         self._camera_pose = camera_pose
 
         self._scene.set_pose(self._node_camera, self._camera_pose)
         self._scene.set_pose(self._node_light, self._camera_pose)
 
+    def _camera_update_pose(self):
+        pose = self._camera_transform.get_transform_local()
+        self._camera_set_pose(pose)
+
     def camera_get_pose(self):
         return self._camera_pose
+
+    def camera_get_projection_matrix(self):
+        return self._camera.get_projection_matrix(self._renderer.viewport_width, self._renderer.viewport_height)
     
-    def camera_get_projection_matrix(self, width, height):
-        return self._camera.get_projection_matrix(width, height)
+    def camera_get_transform_plane(self):
+        return self._camera_transform.get_transform_plane()
+    
+    def camera_get_transform_local(self):
+        return self._camera_transform.get_transform_local()
+    
+    def camera_get_parameters(self):
+        return self._camera_transform.get_parameters()
+    
+    def camera_adjust_parameters(self, yaw=None, pitch=None, distance=None, center=None, relative=True):
+        self._camera_transform.adjust_parameters(yaw, pitch, distance, center, relative)
+        self._camera_update_pose()
+
+    def camera_move_center(self, delta_xyz, plane=True):
+        self._camera_transform.move_center(delta_xyz, plane)
+        self._camera_update_pose()
+
+    def camera_solve_fov_z(self, center, points, plane=True):
+        pose = self._camera_transform.get_transform_local() if (not plane) else self._camera_transform.get_transform_plane()
+        x = pose[:3, 0:1]
+        y = pose[:3, 1:2]
+        z = pose[:3, 2:3]
+        wz = geometry_solve_fov_z(self._renderer.viewport_width, self._renderer.viewport_height, self._camera.fx, self._camera.fy, self._camera.cx, self._camera.cy, x, y, z, center, points)
+        return wz
 
     def render(self):
         color, depth = self._renderer.render(self._scene, pyrender.RenderFlags.RGBA)
@@ -1105,14 +1176,9 @@ class renderer_mesh_paint:
 # TODO: smpl pose adjustments
 class renderer:
     def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
-        self._camera_transform = renderer_camera_transform(**settings_camera_transform)
-        self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_lamp, self._camera_transform.get_transform_local())
+        self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp)
         self._smpl_meshes = dict()
         self._smpl_render = dict()
-        self._viewport_width = settings_offscreen['viewport_width']
-        self._viewport_height = settings_offscreen['viewport_height']
-        self._camera_fx = settings_camera['fx']
-        self._camera_fy = settings_camera['fy']
 
     def load_uv(self, filename_uv, texture_shape):
         self._uv_transform, self._mesh_a_faces, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
@@ -1216,59 +1282,46 @@ class renderer:
         visual, effect = self._smpl_render[name]
         effect.layer_clear(0)
 
-    def camera_solve_fov_z(self, center, points, plane=False):
-        pose = self._camera_transform.get_transform_local() if (not plane) else self._camera_transform.get_transform_plane()
-        x = pose[:3, 0:1]
-        y = pose[:3, 1:2]
-        z = pose[:3, 2:3]
-        wz = geometry_solve_fov_z(self._viewport_width, self._viewport_height, self._camera_fx, self._camera_fy, x, y, z, center, points)
-        return wz
+
+
+
+
+
+    def camera_get_pose(self):
+        return self._scene_control.camera_get_pose()
+
+    def camera_get_projection_matrix(self):
+        self._scene_control.camera_get_projection_matrix()
+
+    def camera_get_transform_local(self):
+        return self._scene_control.camera_get_transform_local()
 
     def camera_get_transform_plane(self):
-        return self._camera_transform.get_transform_plane()
+        return self._scene_control.camera_get_transform_plane()   
     
-    def camera_get_transform_local(self):
-        return self._camera_transform.get_transform_local()
-    
-    def camera_adjust(self, yaw=None, pitch=None, distance=None, center=None, relative=True):
-        if (relative):
-            if (yaw is not None):
-                self._camera_transform.update_yaw(yaw)
-            if (pitch is not None):
-                self._camera_transform.update_pitch(pitch)
-            if (distance is not None):
-                self._camera_transform.update_distance(distance)
-            if (center is not None):
-                self._camera_transform.update_center(center)
-        else:
-            if (yaw is not None):
-                self._camera_transform.set_yaw(yaw)
-            if (pitch is not None):
-                self._camera_transform.set_pitch(pitch)
-            if (distance is not None):
-                self._camera_transform.set_distance(distance)
-            if (center is not None):
-                self._camera_transform.set_center(center)
-        
-        pose = self._camera_transform.get_transform_local()
-        self._scene_control.camera_set_pose(pose)
-
     def camera_get_parameters(self):
-        yaw = self._camera_transform.get_yaw()
-        pitch = self._camera_transform.get_pitch()
-        distance = self._camera_transform.get_distance()
-        center = self._camera_transform.get_center()
-        tc = self._camera_transform.get_matrix_center()
-        ry = self._camera_transform.get_matrix_yaw()
-        rx = self._camera_transform.get_matrix_pitch()
-        tz = self._camera_transform.get_matrix_distance()
-        return (yaw, pitch, distance, center, tc, ry, rx, tz)
+        return self._scene_control.camera_get_parameters()
+
+    def camera_adjust_parameters(self, yaw=None, pitch=None, distance=None, center=None, relative=True):
+        self._scene_control.camera_adjust_parameters(yaw, pitch, distance, center, relative)
+
+    def camera_move_center(self, delta_xyz, plane=True):
+        self._scene_control.camera_move_center(delta_xyz, plane)
+
+    def camera_solve_fov_z(self, center, points, plane=True):
+        return self._scene_control.camera_solve_fov_z(center, points, plane)
+
+
+
 
     def mesh_add(self, name, mesh, pose):
         self._scene_control.group_item_add('arrow', name, mesh_to_renderer(mesh), pose)
 
     def mesh_remove(self, name):
         self._scene_control.group_item_remove('arrow', name)
+
+
+
 
 
     
