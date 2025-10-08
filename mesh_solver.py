@@ -1180,13 +1180,50 @@ class renderer:
         self._smpl_meshes = dict()
         self._smpl_render = dict()
 
+    def camera_get_pose(self):
+        return self._scene_control.camera_get_pose()
+
+    def camera_get_projection_matrix(self):
+        self._scene_control.camera_get_projection_matrix()
+
+    def camera_get_transform_local(self):
+        return self._scene_control.camera_get_transform_local()
+
+    def camera_get_transform_plane(self):
+        return self._scene_control.camera_get_transform_plane()   
+    
+    def camera_get_parameters(self):
+        return self._scene_control.camera_get_parameters()
+
+    def camera_adjust_parameters(self, yaw=None, pitch=None, distance=None, center=None, relative=True):
+        self._scene_control.camera_adjust_parameters(yaw, pitch, distance, center, relative)
+
+    def camera_move_center(self, delta_xyz, plane=True):
+        self._scene_control.camera_move_center(delta_xyz, plane)
+
+    def camera_solve_fov_z(self, center, points, plane=True):
+        return self._scene_control.camera_solve_fov_z(center, points, plane)
+    
+    def scene_render(self):
+        return self._scene_control.render()
+    
+
+
+
+
+
+
+
+
+
+
+
     def load_uv(self, filename_uv, texture_shape):
         self._uv_transform, self._mesh_a_faces, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
         self._mesh_b_uvx = texture_uv_to_uvx(self._mesh_b_uv.copy(), texture_shape)
         self._texture_shape = texture_shape
 
-    def scene_render(self):
-        return self._scene_control.render()
+    
 
     def smpl_mesh_set(self, name, vertices, joints, faces, texture, pose=np.eye(4, dtype=np.float32)):
         render = self._smpl_render.get(name, None)
@@ -1287,29 +1324,8 @@ class renderer:
 
 
 
-    def camera_get_pose(self):
-        return self._scene_control.camera_get_pose()
 
-    def camera_get_projection_matrix(self):
-        self._scene_control.camera_get_projection_matrix()
-
-    def camera_get_transform_local(self):
-        return self._scene_control.camera_get_transform_local()
-
-    def camera_get_transform_plane(self):
-        return self._scene_control.camera_get_transform_plane()   
     
-    def camera_get_parameters(self):
-        return self._scene_control.camera_get_parameters()
-
-    def camera_adjust_parameters(self, yaw=None, pitch=None, distance=None, center=None, relative=True):
-        self._scene_control.camera_adjust_parameters(yaw, pitch, distance, center, relative)
-
-    def camera_move_center(self, delta_xyz, plane=True):
-        self._scene_control.camera_move_center(delta_xyz, plane)
-
-    def camera_solve_fov_z(self, center, points, plane=True):
-        return self._scene_control.camera_solve_fov_z(center, points, plane)
 
 
 
