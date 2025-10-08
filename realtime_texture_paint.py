@@ -265,12 +265,12 @@ class demo:
         I3 = np.eye(3, dtype=np.float32)
         pose_cone =  np.eye(4, dtype=np.float32)
         pose_sphere = np.eye(4, dtype=np.float32)
-
+        
         while (use_offscreen):
             #vertex_index = mesh.faces[face_index][snap_index]
             smpl_frame = self._offscreen_renderer.smpl_chart_create_frame('mesh_test', 'body_center')
             wz = self._offscreen_renderer.camera_solve_fov_z(smpl_frame.center, smpl_frame.points)
-            self._offscreen_renderer.camera_adjust(center=smpl_frame.center, distance=wz, relative=False)
+            #self._offscreen_renderer.camera_adjust_parameters(center=smpl_frame.center, distance=wz, relative=False)
             anchor = self._offscreen_renderer.smpl_chart_from_cylindrical('mesh_test', smpl_frame, displacement, angle)
             #anchor = self._offscreen_renderer.smpl_chart_from_spherical('mesh_test', smpl_frame, angle, displacement)
             #print(smpl_frame)
@@ -315,56 +315,31 @@ class demo:
                 angle -= da
 
             if (key == 68 or key == 100): # d
-                self._offscreen_renderer.camera_adjust(yaw=10)
+                self._offscreen_renderer.camera_adjust_parameters(yaw=10)
             if (key == 65 or key == 97): # a
-                self._offscreen_renderer.camera_adjust(yaw=-10)
+                self._offscreen_renderer.camera_adjust_parameters(yaw=-10)
             if (key == 87 or key == 119): # w
-                self._offscreen_renderer.camera_adjust(pitch=10)
+                self._offscreen_renderer.camera_adjust_parameters(pitch=10)
             if (key == 83 or key == 115): # s
-                self._offscreen_renderer.camera_adjust(pitch=-10)
+                self._offscreen_renderer.camera_adjust_parameters(pitch=-10)
             if (key == 82 or key == 114): #r
-                self._offscreen_renderer.camera_adjust(distance=-0.1)
+                self._offscreen_renderer.camera_adjust_parameters(distance=-0.1)
             if (key == 70 or key == 102): #f
-                self._offscreen_renderer.camera_adjust(distance=0.1)
+                self._offscreen_renderer.camera_adjust_parameters(distance=0.1)
             if (key == 85 or key == 117): #u
-                if (use_plane):
-                    pose = self._offscreen_renderer.camera_get_transform_plane()
-                else:
-                    pose = self._offscreen_renderer.camera_get_transform_local()
-                self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 1])
+                self._offscreen_renderer.camera_move_center([0, 0.1, 0], use_plane)
             if (key == 74 or key == 106): #j
-                if (use_plane):
-                    pose = self._offscreen_renderer.camera_get_transform_plane()
-                else:
-                    pose = self._offscreen_renderer.camera_get_transform_local()
-                self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 1])
+                self._offscreen_renderer.camera_move_center([0, -0.1, 0], use_plane)
             if (key == 73 or key == 105): #i
-                if (use_plane):
-                    pose = self._offscreen_renderer.camera_get_transform_plane()
-                else:
-                    pose = self._offscreen_renderer.camera_get_transform_local()
-                self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 2])
+                self._offscreen_renderer.camera_move_center([0, 0, 0.1], use_plane)
             if (key == 75 or key == 107): #k
-                if (use_plane):
-                    pose = self._offscreen_renderer.camera_get_transform_plane()
-                else:
-                    pose = self._offscreen_renderer.camera_get_transform_local()
-                self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 2])
+                self._offscreen_renderer.camera_move_center([0, 0, -0.1], use_plane)
             if (key == 78 or key == 110): #n
-                if (use_plane):
-                    pose = self._offscreen_renderer.camera_get_transform_plane()
-                else:
-                    pose = self._offscreen_renderer.camera_get_transform_local()
-                self._offscreen_renderer.camera_adjust(center=0.1*pose[:3, 0])
+                self._offscreen_renderer.camera_move_center([0.1, 0, 0], use_plane)
             if (key == 77 or key == 109): #m
-                if (use_plane):
-                    pose = self._offscreen_renderer.camera_get_transform_plane()
-                else:
-                    pose = self._offscreen_renderer.camera_get_transform_local()
-                self._offscreen_renderer.camera_adjust(center=-0.1*pose[:3, 0])
+                self._offscreen_renderer.camera_move_center([-0.1, 0, 0], use_plane)
             if (key == 27): # esc
                 break
-
 
         if (update_region):
             viewer.set_camera_target(camera_pose, focus_axis, focus_center)
