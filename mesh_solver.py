@@ -34,6 +34,7 @@ def geometry_solve_basis(vas, vbs, vad, vbd):
     return np.linalg.inv(np.vstack((vas, vbs, np.cross(vas, vbs)))) @ np.vstack((vad, vbd, np.cross(vad, vbd)))
 
 
+# TODO: cx, cy?
 def geometry_solve_fov_z(width, height, fx, fy, cx, cy, x, y, z, center, points):
     dp = (points - center)
     dx = np.abs(dp @ x)
@@ -183,7 +184,7 @@ def mesh_create(vertices, faces, visual=None):
 
 
 def mesh_expand(mesh, uv_transform, faces_extended, visual=None):
-    return mesh_create(mesh.vertices[uv_transform, :], faces_extended, visual)
+    return mesh_create(mesh.vertices.view(np.ndarray)[uv_transform, :], faces_extended, visual)
 
 
 def mesh_raycast(mesh, origin, direction):
@@ -1274,6 +1275,7 @@ class renderer:
 
 
 
+
             
 
 
@@ -1346,6 +1348,8 @@ class renderer:
         return mesh_chart_point(point, face_index, origin, None, None)
     
     
+
+
 
 
 
