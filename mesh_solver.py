@@ -377,10 +377,11 @@ class mesh_neighborhood_operation_decal:
 
 
 class paint_brush_solid:
-    def __init__(self, size, color, render_buffer):
+    def __init__(self, size, color, render_buffer, fill_test=0.0):
         self._size = size
         self._color = color
         self._render_buffer = render_buffer
+        self._fill_test = fill_test
 
     def paint(self, pixels, distances, level):
         mask = distances < self._size
@@ -388,15 +389,16 @@ class paint_brush_solid:
         if (pixels_painted > 0):
             selection = pixels[mask, :]
             self._render_buffer[selection[:, 1], selection[:, 0], :] = self._color
-        return pixels_painted
+        return 1 if (pixels_painted > int(self._fill_test * pixels.shape[0])) else 0
 
 
 class paint_brush_gradient:
-    def __init__(self, size, color_center, color_edge, hardness, render_buffer):
+    def __init__(self, size, color_center, color_edge, hardness, render_buffer, fill_test=0.0):
         self._size = size
         self._color_center = color_center
         self._color_edge = color_edge
         self._render_buffer = render_buffer
+        self._fill_test = fill_test
         self._src = [0, hardness, 1]
         self._dst = [0, 0.5, 1]
 
@@ -406,18 +408,19 @@ class paint_brush_gradient:
         if (pixels_painted > 0):
             selection = pixels[mask, :]
             self._render_buffer[selection[:, 1], selection[:, 0], :] = texture_alpha_blend(self._color_center, self._color_edge, texture_alpha_remap(distances[mask, np.newaxis] / self._size, self._src, self._dst))
-        return pixels_painted
+        return 1 if (pixels_painted > int(self._fill_test * pixels.shape[0])) else 0
 
 
 # TODO: THIS UNWRAPPING METHOD IS AFFECTED BY THE ORDER IN WHICH FACES ARE PROCESSED
 class paint_decal_solid:
-    def __init__(self, align_prior, angle, scale, image_buffer, render_buffer, double_cover_test=True, tolerance=0):
+    def __init__(self, align_prior, angle, scale, image_buffer, render_buffer, double_cover_test=True, fill_test=0.0, tolerance=0):
         self._align_prior = align_prior
         self._angle = angle
         self._scale = scale
         self._image_buffer = image_buffer
         self._render_buffer = render_buffer
         self._double_cover_test = double_cover_test
+        self._fill_test = fill_test
         self._tolerance = tolerance
         self._simplices = []
         self._simplices_map = []
@@ -505,7 +508,7 @@ class paint_decal_solid:
             dst = pixels_dst[mask, :]
             src = pixels_src[mask, :]
             self._render_buffer[dst[:, 1], dst[:, 0], :] = texture_read(self._image_buffer, src[:, 0], src[:, 1])
-        return pixels_painted
+        return 1 if (pixels_painted > int(self._fill_test * pixels_dst.shape[0])) else 0
 
     def paint(self, mesh_vertices, face_normal, origin, indices_vertices, indices_uvx, pixels_dst, weights_src, level):
         call = self._blit if ((pixels_dst is not None) and (weights_src is not None)) else self._unwrap if (level > 0) else self._bootstrap
@@ -1128,17 +1131,17 @@ class renderer_mesh_paint:
     def texture_detach(self, texture_id):
         self._textures.pop(texture_id)
 
-    def brush_create_solid(self, brush_id, size, color, layer_id):
-        self._brushes[brush_id] = paint_brush_solid(size, color, self._layers[layer_id])
+    def brush_create_solid(self, brush_id, size, color, layer_id, fill_test=0.0):
+        self._brushes[brush_id] = paint_brush_solid(size, color, self._layers[layer_id], fill_test)
 
-    def brush_create_gradient(self, brush_id, size, color_center, color_edge, hardness, layer_id):
-        self._brushes[brush_id] = paint_brush_gradient(size, color_center, color_edge, hardness, self._layers[layer_id])
+    def brush_create_gradient(self, brush_id, size, color_center, color_edge, hardness, layer_id, fill_test=0.0):
+        self._brushes[brush_id] = paint_brush_gradient(size, color_center, color_edge, hardness, self._layers[layer_id], fill_test)
 
     def brush_delete(self, brush_id):
         self._brushes.pop(brush_id)
 
-    def decal_create_solid(self, decal_id, align_prior, angle, scale, texture_id, layer_id, double_cover_test=True, tolerance=0):
-        self._decals[decal_id] = paint_decal_solid(align_prior, angle, scale, self._textures[texture_id], self._layers[layer_id], double_cover_test, tolerance)
+    def decal_create_solid(self, decal_id, align_prior, angle, scale, texture_id, layer_id, double_cover_test=True, fill_test=0.0, tolerance=0):
+        self._decals[decal_id] = paint_decal_solid(align_prior, angle, scale, self._textures[texture_id], self._layers[layer_id], double_cover_test, fill_test, tolerance)
 
     def decal_delete(self, decal_id):
         self._decals.pop(decal_id)
@@ -1180,6 +1183,11 @@ class renderer:
         self._smpl_meshes = dict()
         self._smpl_render = dict()
 
+    def load_uv(self, filename_uv, texture_shape):
+        self._uv_transform, self._mesh_a_faces, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
+        self._mesh_b_uvx = texture_uv_to_uvx(self._mesh_b_uv.copy(), texture_shape)
+        self._texture_shape = texture_shape
+
     def camera_get_pose(self):
         return self._scene_control.camera_get_pose()
 
@@ -1207,6 +1215,50 @@ class renderer:
     def scene_render(self):
         return self._scene_control.render()
     
+    def smpl_paint_brush_solid(self, name, anchor, size, color, fill_test=0.0, timeout=0.05, steps=1, tolerance=0):
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
+        visual, effect = self._smpl_render[name]
+        effect.brush_create_solid(0, size, color, 0, fill_test)
+        effect.task_create_paint_brush(0, mesh_a, mesh_b, anchor.face_index, anchor.point, [0], tolerance)
+        effect.task_execute(0, timeout, steps)
+        return effect.task_done(0)
+    
+    def smpl_paint_brush_gradient(self, name, anchor, size, color_center, color_edge, hardness, fill_test=0.0, timeout=0.05, steps=1, tolerance=0):
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
+        visual, effect = self._smpl_render[name]
+        effect.brush_create_gradient(1, size, color_center, color_edge, hardness, 0, fill_test)
+        effect.task_create_paint_brush(1, mesh_a, mesh_b, anchor.face_index, anchor.point, [1], tolerance)
+        effect.task_execute(1, timeout, steps)
+        return effect.task_done(1)
+    
+    def smpl_paint_decal_solid(self, name, anchor, decal, align_prior, angle, scale, double_cover_test=True, fill_test=0.0, timeout=0.05, steps=1, tolerance_decal=0, tolerance_paint=0):
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
+        visual, effect = self._smpl_render[name]
+        effect.texture_attach(0, decal)
+        effect.decal_create_solid(0, align_prior, angle, scale, 0, 0, double_cover_test, fill_test, tolerance_decal)
+        effect.task_create_paint_decal(2, mesh_a, mesh_b, anchor.face_index, anchor.point, 0, tolerance_paint)
+        effect.task_execute(2, timeout, steps)
+        return effect.task_done(2)
+    
+    def smpl_paint_decal_align_prior(self, name, anchor, align_axis, align_axis_fallback, tolerance=0):
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
+        align_normal = mesh_a.face_normals[anchor.face_index:(anchor.face_index+1), :]
+        align_prior, nap = math_normalize(align_axis - (align_normal @ align_axis.T) * align_normal)
+        return align_prior if (nap > tolerance) else math_normalize(align_axis_fallback - (align_normal @ align_axis_fallback.T) * align_normal)[0]
+
+
+
+
+    def smpl_paint_flush(self, name):
+        visual, effect = self._smpl_render[name]
+        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
+        effect.flush()
+        mesh_p = mesh_to_renderer(mesh_b)
+        self._scene_control.group_item_add('smpl', name, mesh_p, pose)
+
+    def smpl_paint_clear(self, name):
+        visual, effect = self._smpl_render[name]
+        effect.layer_clear(0)
 
 
 
@@ -1218,10 +1270,26 @@ class renderer:
 
 
 
-    def load_uv(self, filename_uv, texture_shape):
-        self._uv_transform, self._mesh_a_faces, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
-        self._mesh_b_uvx = texture_uv_to_uvx(self._mesh_b_uv.copy(), texture_shape)
-        self._texture_shape = texture_shape
+
+
+
+
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
 
     
 
@@ -1274,50 +1342,21 @@ class renderer:
 
     def smpl_operation_closest(self, name, origin) -> mesh_chart_point:
         mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
-        point, face_index = mesh_closest(mesh_a, origin)
+        point, face_index, _,  = mesh_closest(mesh_a, origin)
         return mesh_chart_point(point, face_index, origin, None, None)
     
-    def smpl_paint_brush_solid(self, name, anchor, size, color, timeout=0.05, steps=1, tolerance=0):
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
-        visual, effect = self._smpl_render[name]
-        effect.brush_create_solid(0, size, color, 0)
-        effect.task_create_paint_brush(0, mesh_a, mesh_b, anchor.face_index, anchor.point, [0], tolerance)
-        effect.task_execute(0, timeout, steps)
-        return effect.task_done(0)
-
-    def smpl_paint_brush_gradient(self, name, anchor, size, color_center, color_edge, hardness, timeout=0.05, steps=1, tolerance=0):
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
-        visual, effect = self._smpl_render[name]
-        effect.brush_create_gradient(1, size, color_center, color_edge, hardness, 0)
-        effect.task_create_paint_brush(1, mesh_a, mesh_b, anchor.face_index, anchor.point, [1], tolerance)
-        effect.task_execute(1, timeout, steps)
-        return effect.task_done(1)
     
-    def smpl_paint_decal_solid(self, name, anchor, decal, align_prior, angle, scale, double_cover_test=True, timeout=0.05, steps=1, tolerance_decal=0, tolerance_paint=0):
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
-        visual, effect = self._smpl_render[name]
-        effect.texture_attach(0, decal)
-        effect.decal_create_solid(0, align_prior, angle, scale, 0, 0, double_cover_test, tolerance_decal)
-        effect.task_create_paint_decal(2, mesh_a, mesh_b, anchor.face_index, anchor.point, 0, tolerance_paint)
-        effect.task_execute(2, timeout, steps)
-        return effect.task_done(2)
+
+
+
+
     
-    def smpl_paint_decal_align_prior(self, name, anchor, align_axis):
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
-        align_normal = mesh_a.face_normals[anchor.face_index:(anchor.face_index+1), :]
-        align_prior = math_normalize(align_axis - (align_normal @ align_axis.T) * align_normal)[0]
-        return align_prior
+    
+    
+    
+    
 
-    def smpl_paint_flush(self, name):
-        visual, effect = self._smpl_render[name]
-        mesh_a, mesh_b, chart, pose = self._smpl_meshes[name]
-        effect.flush()
-        mesh_p = mesh_to_renderer(mesh_b)
-        self._scene_control.group_item_add('smpl', name, mesh_p, pose)
-
-    def smpl_paint_clear(self, name):
-        visual, effect = self._smpl_render[name]
-        effect.layer_clear(0)
+    
 
 
 
