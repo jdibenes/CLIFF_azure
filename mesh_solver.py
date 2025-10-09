@@ -11,6 +11,7 @@ import cv2
 import pyrender
 import trimesh.visual
 import trimesh.exchange.obj
+import smplx
 
 from PIL import Image, ImageFont, ImageDraw
 
@@ -641,8 +642,14 @@ class mesh_chart:
 # SMPL Chart
 #------------------------------------------------------------------------------
 
-# TODO: remove hardcoded joints, adapt to normal SMPL joints
-class smpl_mesh_chart(mesh_chart):
+SMPL_TO_OPENPOSE = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4, 7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
+
+
+def smpl_joints_to_openpose(joints):
+    return joints[SMPL_TO_OPENPOSE, :]
+
+
+class smpl_mesh_chart_openpose(mesh_chart):
     def __init__(self, mesh, joints):
         super().__init__(mesh)
         self._joints = joints
@@ -1214,11 +1221,22 @@ class renderer_mesh_paint:
 # Renderer
 #------------------------------------------------------------------------------
 
+# TODO: SMPL stuff
 class renderer:
     def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
         self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp)
         self._meshes = dict()
         self._cswvfx = dict()
+
+    def smpl_load_model(self, device):
+        self.smpl_model = smplx.SMPLLayer(model_path='data/smpl/SMPL_NEUTRAL.pkl', num_betas=10).to(device)
+
+    def smpl_get_output_mesh(self, betas):
+        smpl_output = self.smpl_model(betas=betas)
+        pred_keypoints_3d = smpl_output.joints
+        pred_vertices = smpl_output.vertices
+        return pred_vertices, pred_keypoints_3d, self.smpl_model.faces
+
 
     def smpl_load_uv(self, filename_uv, texture_shape):
         self._uv_transform, self._mesh_a_faces, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
@@ -1288,7 +1306,7 @@ class renderer:
         visual = self._tvfx_add(group, name, texture)
         mesh_a_tri = mesh
         mesh_b_tri = mesh_expand(mesh_a_tri, self._uv_transform, self._mesh_b_faces, visual)
-        mesh_a_map = smpl_mesh_chart(mesh_a_tri, joints)
+        mesh_a_map = smpl_mesh_chart_openpose(mesh_a_tri, joints)
         self._mesh_add(group, name, mesh_a_tri, mesh_b_tri, mesh_a_map, pose)
 
     def mesh_add_user(self, group, name, mesh, pose):
@@ -1392,35 +1410,199 @@ class renderer:
         effect.flush()
 
 
+
+
 '''
 SMPL Joints
 0: 'pelvis',
 1: 'left_hip',
 2: 'right_hip',
-3: 'spine1',
+3: 'spine1', [X]
 4: 'left_knee',
 5: 'right_knee',
-6: 'spine2',
+6: 'spine2', [X]
 7: 'left_ankle',
 8: 'right_ankle',
-9: 'spine3',
-10: 'left_foot',
-11: 'right_foot',
+9: 'spine3', [X]
+10: 'left_foot', [X]
+11: 'right_foot', [X]
 12: 'neck',
-13: 'left_collar',
-14: 'right_collar',
-15: 'head',
+13: 'left_collar', [X]
+14: 'right_collar', [X]
+15: 'head', [X]
 16: 'left_shoulder',
 17: 'right_shoulder',
 18: 'left_elbow',
 19: 'right_elbow',
 20: 'left_wrist',
 21: 'right_wrist',
-22: 'left_hand',
-23: 'right_hand'
+22: 'left_hand', [X]
+23: 'right_hand' [X]
+
+#Extra
+24: 'nose'
+25: 'reye'
+26: 'leye'
+27: 'rear'
+28: 'lear'
+29: 'LBigToe'
+30: 'LSmallToe'
+31: 'LHeel'
+32: 'RBigToe'
+33: 'RSmallToe'
+34: 'RHeel'
+
+35: 'lthumb' [X]
+36: 'lindex' [X]
+37: 'lmiddle' [X]
+38: 'lring' [X]
+39: 'lpinky' [X]
+
+40: 'rthumb' [X]
+41: 'rindex' [X]
+42: 'rmiddle' [X]
+43: 'rring' [X]
+44: 'rpinky' [X]
+
+# Extra Extra
+45: 'rhip'
+46: 'lhip'
+47: Neck (LSP)
+48: 'Top of Head (LSP)'
+49: 'Pelvis (MPII)'
+50: 'Thorax (MPII)'
+51: 'Spine (H36M)'
+52: 'Jaw (H36M)'
+53: 'Head (H36M)'
 '''
+
+'''
+JOINT_MAP = {
+'OP MidHip': 0,
+'OP LHip': 1,
+'OP RHip': 2,
+
+'OP LKnee': 4,
+'Left Knee': 4,
+'OP RKnee': 5,
+'Right Knee': 5,
+
+'OP LAnkle': 7,
+'Left Ankle': 7,
+'OP RAnkle': 8,
+'Right Ankle': 8,
+
+'OP Neck': 12,
+
+'Left Shoulder': 16,
+'OP LShoulder': 16,
+'Right Shoulder': 17,
+'OP RShoulder': 17,
+'Left Elbow': 18,
+'OP LElbow': 18,
+'Right Elbow': 19, 
+'OP RElbow': 19,
+'Left Wrist': 20,
+'OP LWrist': 20,
+'Right Wrist': 21,
+'OP RWrist': 21,
+
+'Nose': 24,
+'OP Nose': 24,
+'Right Eye': 25,
+'OP REye': 25,
+'Left Eye': 26,
+'OP LEye': 26,
+'Right Ear': 27,
+'OP REar': 27,
+'Left Ear': 28,
+'OP LEar': 28,
+'OP LBigToe': 29,
+'OP LSmallToe': 30,
+'OP LHeel': 31,
+'OP RBigToe': 32,
+'OP RSmallToe': 33,
+'OP RHeel': 34,
+
+# EXTRA
+'Right Hip': 45,
+'Left Hip': 46,
+'Neck (LSP)': 47,
+'Top of Head (LSP)': 48,
+'Pelvis (MPII)': 49,
+'Thorax (MPII)': 50,
+'Spine (H36M)': 51,
+'Jaw (H36M)': 52,
+'Head (H36M)': 53,
+}
+'''
+
+# smpl: 24+21 -> 45 | extra: 9 | total 54
+# out = 25+24 49 elements [OpenPose + others]
+# size:
+# 24: basic SMPL, [X]
+# 45: SMPL
+# 54: SMPL+extras
+# 49: OpenPose + others
+# 25: OpenPose
+
 # global transform
 #p[:3, 3:4] = (center + wz * z)
         # mesh_a = 6890 vertices 13776 faces 6890 uvs
         # mesh_b = 7576 vertices 13776 faces 7576 uvs
         # same faces, duplicated vertices for vertices with multiple uv's
+'''
+JOINT_NAMES = [
+# 25 OpenPose joints (in the order provided by OpenPose)
+'OP Nose',0
+'OP Neck',1
+'OP RShoulder',2
+'OP RElbow',3
+'OP RWrist',4
+'OP LShoulder',5
+'OP LElbow',6
+'OP LWrist',7
+'OP MidHip',8
+'OP RHip',9
+'OP RKnee',10
+'OP RAnkle',11
+'OP LHip',12
+'OP LKnee',13
+'OP LAnkle',14
+'OP REye',15
+'OP LEye',16
+'OP REar',17
+'OP LEar',18
+'OP LBigToe',19
+'OP LSmallToe',20
+'OP LHeel',21
+'OP RBigToe',22
+'OP RSmallToe',23
+'OP RHeel',24
+# 24 Ground Truth joints (superset of joints from different datasets)
+'Right Ankle',
+'Right Knee',
+'Right Hip',
+'Left Hip',
+'Left Knee',
+'Left Ankle',
+'Right Wrist',
+'Right Elbow',
+'Right Shoulder',
+'Left Shoulder',
+'Left Elbow',
+'Left Wrist',
+'Neck (LSP)',
+'Top of Head (LSP)',
+'Pelvis (MPII)',
+'Thorax (MPII)',
+'Spine (H36M)',
+'Jaw (H36M)',
+'Head (H36M)',
+'Nose',
+'Left Eye',
+'Right Eye',
+'Left Ear',
+'Right Ear'
+]
+'''
