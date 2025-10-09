@@ -54,6 +54,16 @@ def geometry_solve_fov_z(width, height, fx, fy, cx, cy, x, y, z, center, points)
     return wz
 
 
+def geometry_fov_to_f(fov, pixels):
+    f = (pixels / 2) / np.tan(fov / 2)
+    return f
+
+
+def geometry_f_to_fov(f, pixels):
+    fov = 2 * np.arctan((pixels / 2) / f)
+    return fov
+
+
 #------------------------------------------------------------------------------
 # Texture Processing
 #------------------------------------------------------------------------------
