@@ -26,11 +26,11 @@ def math_normalize(a):
 
 
 def math_transform_points(points, pose, inverse=False):
-    return ((points @ pose[:3, :3].T) + pose[:3, 3:4].T) if (not inverse) else ((points - pose[:3, 3:4].T) @ pose[:3, :3])
+    return ((points @ pose[:3, :3]) + pose[3:4, :3]) if (not inverse) else ((points - pose[3:4, :3]) @ pose[:3, :3].T)
 
 
 def math_transform_bearings(bearings, pose, inverse=False):
-    return (bearings @ pose[:3, :3].T) if (not inverse) else (bearings @ pose[:3, :3])
+    return (bearings @ pose[:3, :3]) if (not inverse) else (bearings @ pose[:3, :3].T)
 
 
 #------------------------------------------------------------------------------
@@ -1305,14 +1305,14 @@ class renderer:
 
     def mesh_operation_raycast(self, group, name, origin, direction) -> mesh_chart_point:
         mesh_a, mesh_b, chart, pose = self._meshes[group][name]
-        local_origin = math_transform_points(origin, pose, False)
-        local_direction = math_transform_bearings(direction, pose, False)
+        local_origin = math_transform_points(origin, pose.T, True)
+        local_direction = math_transform_bearings(direction, pose.T, True)
         point, face_index = mesh_raycast(mesh_a, local_origin, local_direction)
         return mesh_chart_point(point, face_index, local_origin, local_direction, None)
 
     def mesh_operation_closest(self, group, name, origin) -> mesh_chart_point:
         mesh_a, mesh_b, chart, pose = self._meshes[group][name]
-        local_origin = math_transform_points(origin, pose, False)
+        local_origin = math_transform_points(origin, pose.T, True)
         point, face_index, _, = mesh_closest(mesh_a, local_origin)
         return mesh_chart_point(point, face_index, local_origin, None, None)
 
@@ -1330,12 +1330,12 @@ class renderer:
     
     def smpl_chart_to_cylindrical(self, group, name, frame, point) -> mesh_chart_local:
         mesh_a, mesh_b, chart, pose = self._meshes[group][name]
-        local_point = math_transform_points(point, pose, False)
+        local_point = math_transform_points(point, pose.T, True)
         return chart.to_cylindrical(frame, local_point)
     
     def smpl_chart_to_spherical(self, group, name, frame, point) -> mesh_chart_local:
         mesh_a, mesh_b, chart, pose = self._meshes[group][name]
-        local_point = math_transform_points(point, pose, False)
+        local_point = math_transform_points(point, pose.T, True)
         return chart.to_spherical(frame, local_point)
 
     def smpl_paint_brush_solid(self, group, name, anchor, size, color, fill_test=0.0, timeout=0.05, steps=1, tolerance=0) -> bool:
@@ -1407,3 +1407,6 @@ SMPL Joints
 '''
 # global transform
 #p[:3, 3:4] = (center + wz * z)
+        # mesh_a = 6890 vertices 13776 faces 6890 uvs
+        # mesh_b = 7576 vertices 13776 faces 7576 uvs
+        # same faces, duplicated vertices for vertices with multiple uv's
