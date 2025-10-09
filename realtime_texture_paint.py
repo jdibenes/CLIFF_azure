@@ -18,6 +18,7 @@ from models.cliff_hr48.cliff import CLIFF as cliff_hr48
 from common.utils import strip_prefix_if_present, cam_crop2full
 # from common.mocap_dataset import MocapDataset  # not used in this live demo
 
+import trimesh
 import mesh_solver
 import visualizer
 
@@ -66,15 +67,16 @@ def create_model(img_shape):
 # mesh_b = 7576 vertices 13776 faces 7576 uvs
 # same faces, duplicated vertices for vertices with multiple uv's
 
-class demo:
+
+class demo2:
     def run(self, args):
         # Set up the webcam and offscreen pyrender renderer.
         #cap = visualizer.camera_opencv()
-        cap = visualizer.camera_null()
-        cap.open()
+        self._cap = visualizer.camera_null()
+        self._cap.open()
 
         # Model stuff
-        frame_data = cap.read()
+        frame_data = self._cap.read()
         if ('depth_intrinsics' in frame_data):
             print(f"depth_intrinsics={frame_data['depth_intrinsics']}")
             print(f"depth_scale={frame_data['depth_scale']}")
@@ -90,7 +92,7 @@ class demo:
         cfg_camera_transform = mesh_solver.renderer_create_settings_camera_transform()
         cfg_lamp = mesh_solver.renderer_create_settings_lamp()
         self._offscreen_renderer = mesh_solver.renderer(cfg_offscreen, cfg_scene, cfg_camera, cfg_camera_transform, cfg_lamp)
-        self._offscreen_renderer.load_uv('./data/smpl_uv.obj', [1024, 1024])
+        self._offscreen_renderer.smpl_load_uv('./data/smpl_uv.obj', [1024, 1024])
 
         tex_filename = './data/textures/f_01_alb.002_1k.png'
         #tex_filename = './data/textures/smpl_uv_20200910.png'
@@ -102,86 +104,41 @@ class demo:
         
         self._device, self._cliff_model, self._bbox_info, self._smpl = create_model(frame.shape)
 
-        # Initialize visualization utilities
-        viewport_width, viewport_height = 1280, 720
-        camera_yfov = np.pi / 3
-        joint_solver  = visualizer.solver(camera_yfov, viewport_width, viewport_height)
-        scene_control = visualizer.scene_manager(camera_yfov)
+        self._cone = mesh_solver.mesh_create_cone(0.015, 0.04, 10)
+        self._sphere = mesh_solver.mesh_create_sphere(0.002)
+        self._I3 = np.eye(3, dtype=np.float32)
+        self._pose_cone =  np.eye(4, dtype=np.float32)
+        self._pose_sphere = np.eye(4, dtype=np.float32)
 
-        self._cap = cap
-        
-        self._joint_solver = joint_solver
-        self._scene_control = scene_control
-        self._regions = [
-            #joint_solver.focus_center_whole,
-            joint_solver.focus_center_body,
-            joint_solver.focus_right_lower_leg,
-            joint_solver.focus_left_lower_leg,
-        ]        
+        self._use_plane = True
+        self._di = 0.02
+        self._da = (10/180) * np.pi
 
-        # Start with state 1 and focus full body.
-        self._current_state = 0
-        self._current_region = 0
-        self._next_region = 0
-        self._pointer_position = [0, 0]
-        self._pointer_size = 0.05
-
-        di = 0.02
-        da = (10/180) * np.pi
-        dr = 0.01
-
-        key_handlers = {
-            '2': (self.traverse, [di, 0]),
-            '3': (self.traverse, [-di, 0]),
-            '4': (self.traverse, [0, da]),
-            '5': (self.traverse, [0, -da]),
-            '6': (self.adjust_pointer, [dr]),
-            '7': (self.adjust_pointer, [-dr]),
-            '8': (self.advance_target, []),
-        }
-
-        viewer_flags = {'vsv.hook_on_begin' : (self.animate, [])}
+        self._displacement = 0
+        self._angle = 0
 
         print("Starting real-time inference.")
-        print("Press 'q' to exit.")
-        print("Press 2/3 to move pointer.")
-        print("Press 4/5 to rotate pointer.")
-        print("Press 6/7 to adjust pointer size.")
-        print("Press 8 to cycle through full body / right leg / left leg.")
 
-        visualizer.viewer(self._scene_control._scene,
-                    viewport_size=(viewport_width, viewport_height),
-                    viewer_flags=viewer_flags,
-                    use_raymond_lighting=True,
-                    registered_keys=key_handlers)
+        start = time.perf_counter()
+        count = 0
+        while (self._loop()):
+            count += 1
+            end = time.perf_counter()
+            if (end-start > 2.0):
+                print(f'FPS: ', count / (end-start))
+                start = end
+                count = 0
 
-        cap.close()
+        self._cap.close()
 
-    def advance_target(self, viewer):
-        self._next_region = (self._current_region + 1) % len(self._regions)
-        self._pointer_position = [0, 0]
-
-    def traverse(self, viewer, delta_displacement, delta_angle):
-        displacement = self._pointer_position[0] + delta_displacement
-        angle = self._pointer_position[1] + delta_angle
-        if (angle > np.pi):
-            angle = angle - (2*np.pi)
-        if (angle < -np.pi):
-            angle = angle + (2*np.pi)
-        self._pointer_position = [displacement, angle]
-
-    def adjust_pointer(self, viewer, delta_radius):
-        radius = max([self._pointer_size + delta_radius, 0])
-        self._pointer_size = radius
-
-    def animate(self, viewer):
+    def _loop(self):
         frame_data = self._cap.read()
         frame = frame_data['color']
-        if ('depth' in frame_data):
-            depth = frame_data['depth']
-            cv2.imshow('Depth', cv2.applyColorMap((((depth * frame_data['depth_scale']) / 7.5) * 255).astype(np.uint8), cv2.COLORMAP_INFERNO))
-        cv2.imshow('Video', frame)
-        cv2.waitKey(1)
+        #if ('depth' in frame_data):
+        #    depth = frame_data['depth']
+            #cv2.imshow('Depth', cv2.applyColorMap((((depth * frame_data['depth_scale']) / 7.5) * 255).astype(np.uint8), cv2.COLORMAP_INFERNO))
+        #cv2.imshow('Video', frame)
+        #cv2.waitKey(1)
 
         norm_img = preprocess_frame(frame, target_size=(224, 224)).to(self._device)
 
@@ -195,161 +152,284 @@ class demo:
             pred_output = self._smpl(betas=pred_betas, body_pose=smpl_poses[:, 3:], global_orient=smpl_poses[:, :3], pose2rot=True)
         
         vertices = pred_output.vertices.cpu().detach().numpy()[0]
-        joints = pred_output.joints.cpu().detach().numpy()[0].T
+        joints = pred_output.joints.cpu().detach().numpy()[0]
         faces = self._smpl.faces
 
+        smpl_mesh_pose = trimesh.transformations.rotation_matrix(np.radians(180), [1, 0, 0])
+        #smpl_mesh_pose[:3, 3] = [-1, 2, 3]
+        #smpl_mesh_pose = np.eye(4, dtype=np.float32)
+        ##
         mesh = mesh_solver.mesh_create(vertices, faces)
+        self._offscreen_renderer.mesh_add_smpl('smpl', 'patient', mesh, joints, self._texture_array, smpl_mesh_pose)
+        #vertex_index = mesh.faces[face_index][snap_index]
+        smpl_frame = self._offscreen_renderer.smpl_chart_create_frame('smpl', 'patient', 'body_center')
+        #wz = self._offscreen_renderer.camera_solve_fov_z(smpl_frame.center, smpl_frame.points) # requires GLOBAL coordinates
+        #self._offscreen_renderer.camera_adjust_parameters(center=smpl_frame.center, distance=wz, relative=False) # requires GLOBAL coordinates
+        anchor = self._offscreen_renderer.smpl_chart_from_cylindrical('smpl', 'patient', smpl_frame, self._displacement, self._angle)
+        #anchor = self._offscreen_renderer.smpl_chart_from_spherical('smpl', 'patient', smpl_frame, self._angle, self._displacement)
+        #print(smpl_frame)
+        #print(smpl_frame)
+        #print([angle,displacement])
+        #cyl_local = self._offscreen_renderer.smpl_chart_to_cylindrical('smpl', 'patient', smpl_frame, anchor.point) # requires GLOBAL coordinates
+        #print([cyl_local.p1, cyl_local.p2])
+        #sph_local = self._offscreen_renderer.smpl_chart_to_spherical('smpl', 'patient', smpl_frame, anchor.point) # requires GLOBAL coordinates
+        #print([sph_local.p1, sph_local.p2])
+
+        #arrow_r = mesh_solver.geometry_solve_basis(self._I3[1:2, :], self._I3[2:3, :], smpl_frame.up, -anchor.direction)
+        #self._pose_cone[:3, :3] = arrow_r.T
+        #self._pose_cone[:3, 3:4] = (anchor.point + 0.04 * anchor.direction).T
+        #self._pose_sphere[:3, 3:4] = self._offscreen_renderer.mesh_operation_closest('smpl', 'patient', self._pose_cone[:3, 3:4].T).point.T
+
+        #self._offscreen_renderer.mesh_add_user('ui', 'cursor', self._cone, self._pose_cone)
+        #self._offscreen_renderer.mesh_add_user('ui', 'closest', self._sphere, self._pose_sphere)
+
+        #self._offscreen_renderer.smpl_paint_brush_solid('smpl', 'patient', anchor, 0.02, np.array([0, 255, 0, 255], dtype=np.uint8), 0.99)
+        #self._offscreen_renderer.smpl_paint_brush_gradient('smpl', 'patient', anchor, 0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33, 0.5)
+        align_prior = self._offscreen_renderer.smpl_paint_decal_align_prior('smpl', 'patient', anchor, smpl_frame.up, smpl_frame.front)
+        self._offscreen_renderer.smpl_paint_decal_solid('smpl', 'patient', anchor, self._test_stamp, align_prior, 0, 10000 * 2, False, 0.5)
+        #self._offscreen_renderer.smpl_paint_decal_solid('smpl', 'patient', anchor, self._test_text, align_prior, 0, 10000 * 2, False, 0.99, timeout=0.1)
+        self._offscreen_renderer.smpl_paint_flush('smpl', 'patient')
+        self._offscreen_renderer.mesh_present_smpl('smpl', 'patient')
+        self._offscreen_renderer.smpl_paint_clear('smpl', 'patient')
+
+        color, _ = self._offscreen_renderer.scene_render()
+
+        cv2.imshow('offscreen test', cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
+        key = cv2.waitKey(1) & 0xFF
+        if (key == 50): # 2
+            self._displacement += self._di
+        if (key == 51): # 3
+            self._displacement -= self._di
+        if (key == 52): # 4
+            self._angle += self._da
+        if (key == 53): # 5
+            self._angle -= self._da
+
+        if (key == 68 or key == 100): # d
+            self._offscreen_renderer.camera_adjust_parameters(yaw=10)
+        if (key == 65 or key == 97): # a
+            self._offscreen_renderer.camera_adjust_parameters(yaw=-10)
+        if (key == 87 or key == 119): # w
+            self._offscreen_renderer.camera_adjust_parameters(pitch=10)
+        if (key == 83 or key == 115): # s
+            self._offscreen_renderer.camera_adjust_parameters(pitch=-10)
+        if (key == 82 or key == 114): #r
+            self._offscreen_renderer.camera_adjust_parameters(distance=-0.1)
+        if (key == 70 or key == 102): #f
+            self._offscreen_renderer.camera_adjust_parameters(distance=0.1)
+        if (key == 85 or key == 117): #u
+            self._offscreen_renderer.camera_move_center([0, 0.1, 0], self._use_plane)
+        if (key == 74 or key == 106): #j
+            self._offscreen_renderer.camera_move_center([0, -0.1, 0], self._use_plane)
+        if (key == 73 or key == 105): #i
+            self._offscreen_renderer.camera_move_center([0, 0, 0.1], self._use_plane)
+        if (key == 75 or key == 107): #k
+            self._offscreen_renderer.camera_move_center([0, 0, -0.1], self._use_plane)
+        if (key == 78 or key == 110): #n
+            self._offscreen_renderer.camera_move_center([0.1, 0, 0], self._use_plane)
+        if (key == 77 or key == 109): #m
+            self._offscreen_renderer.camera_move_center([-0.1, 0, 0], self._use_plane)
+        if (key == 27): # esc
+            return False
+
+        # API
+        '''
+        self._offscreen_renderer.smpl_load_uv()
+
+        self._offscreen_renderer.camera_get_pose()
+        self._offscreen_renderer.camera_get_projection_matrix()
+        self._offscreen_renderer.camera_get_transform_local()
+        self._offscreen_renderer.camera_get_transform_plane()
+        self._offscreen_renderer.camera_get_parameters()
+        self._offscreen_renderer.camera_adjust_parameters() # GLOBAL FRAME
+        self._offscreen_renderer.camera_move_center() # GLOBAL FRAME
+        self._offscreen_renderer.camera_solve_fov_z() # GLOBAL FRAME
+
+        self._offscreen_renderer.scene_render()
+
+        self._offscreen_renderer.mesh_add_smpl()
+        self._offscreen_renderer.mesh_add_user()
+        self._offscreen_renderer.mesh_set_pose()
+        self._offscreen_renderer.mesh_get_pose()
+        self._offscreen_renderer.mesh_present_smpl()
+        self._offscreen_renderer.mesh_present_user()
+        self._offscreen_renderer.mesh_remove_item()
+        self._offscreen_renderer.mesh_remove_group()
+
+        self._offscreen_renderer.mesh_operation_raycast() # GLOBAL FRAME
+        self._offscreen_renderer.mesh_operation_closest() # GLOBAL FRAME
+
+        self._offscreen_renderer.smpl_chart_create_frame() # SMPL FRAME
+        self._offscreen_renderer.smpl_chart_from_cylindrical() # SMPL FRAME
+        self._offscreen_renderer.smpl_chart_from_spherical() # SMPL FRAME
+        self._offscreen_renderer.smpl_chart_to_cylindrical() # GLOBAL FRAME
+        self._offscreen_renderer.smpl_chart_to_spherical() # GLOBAL FRAME
+
+        self._offscreen_renderer.smpl_paint_brush_solid() # SMPL FRAME
+        self._offscreen_renderer.smpl_paint_brush_gradient() # SMPL FRAME
+        self._offscreen_renderer.smpl_paint_decal_solid() # SMPL FRAME
+        self._offscreen_renderer.smpl_paint_decal_align_prior() # SMPL FRAME
+        self._offscreen_renderer.smpl_paint_clear()
+        self._offscreen_renderer.smpl_paint_flush()
+        '''
+
+        
+
+
+        return True
+        
+
+class demo:
+    def run(self, args):
+        pass
+        #print(self._offscreen_renderer.camera_get_transform_plane())
+        #print()
+
+        #pose_sphere[:3, 3:4] = mesh_solver.mesh_closest(mesh, pose_cone[:3, 3:4].T)[0].T
+        # Initialize visualization utilities
+        #viewport_width, viewport_height = 1280, 720
+        #camera_yfov = np.pi / 3
+        #joint_solver  = visualizer.solver(camera_yfov, viewport_width, viewport_height)
+        #scene_control = visualizer.scene_manager(camera_yfov)
+
+        #self._cap = cap
+        
+        #self._joint_solver = joint_solver
+        #self._scene_control = scene_control
+        #self._regions = [
+            #joint_solver.focus_center_whole,
+            #joint_solver.focus_center_body,
+            #joint_solver.focus_right_lower_leg,
+            #joint_solver.focus_left_lower_leg,
+        #]        
+
+        # Start with state 1 and focus full body.
+        #self._current_state = 0
+        #self._current_region = 0
+        #self._next_region = 0
+        #self._pointer_position = [0, 0]
+        #self._pointer_size = 0.05
+
+        #di = 0.02
+        #da = (10/180) * np.pi
+        #dr = 0.01
+
+        #key_handlers = {
+        #    '2': (self.traverse, [di, 0]),
+        #    '3': (self.traverse, [-di, 0]),
+        #    '4': (self.traverse, [0, da]),
+        #    '5': (self.traverse, [0, -da]),
+        #    '6': (self.adjust_pointer, [dr]),
+        #    '7': (self.adjust_pointer, [-dr]),
+        #    '8': (self.advance_target, []),
+        #}
+
+        #viewer_flags = {'vsv.hook_on_begin' : (self.animate, [])}
+
+        #print("Press 'q' to exit.")
+        #print("Press 2/3 to move pointer.")
+        #print("Press 4/5 to rotate pointer.")
+        #print("Press 6/7 to adjust pointer size.")
+        #print("Press 8 to cycle through full body / right leg / left leg.")
+        
+        #visualizer.viewer(self._scene_control._scene,
+        #            viewport_size=(viewport_width, viewport_height),
+        #            viewer_flags=viewer_flags,
+        #            use_raymond_lighting=True,
+        #            registered_keys=key_handlers)
+
+    #def advance_target(self, viewer):
+    #    self._next_region = (self._current_region + 1) % len(self._regions)
+    #    self._pointer_position = [0, 0]
+
+    #def traverse(self, viewer, delta_displacement, delta_angle):
+    #    displacement = self._pointer_position[0] + delta_displacement
+    #    angle = self._pointer_position[1] + delta_angle
+    #    if (angle > np.pi):
+    #        angle = angle - (2*np.pi)
+    #    if (angle < -np.pi):
+    #        angle = angle + (2*np.pi)
+    #    self._pointer_position = [displacement, angle]
+
+    #def adjust_pointer(self, viewer, delta_radius):
+    #    radius = max([self._pointer_size + delta_radius, 0])
+    #    self._pointer_size = radius
+
+    def animate(self, viewer):
+        pass
+       
+
+        #mesh = mesh_solver.mesh_create(vertices, faces)
 
         # todo: project mesh into image
-        if (self._next_region is not None):
-            self._current_region = self._next_region
-            self._next_region    = None
-            update_region        = True
-        else:
-            update_region        = False
-        
-        self._joint_solver.set_smpl_mesh(mesh, joints, None)
+        #if (self._next_region is not None):
+        #    self._current_region = self._next_region
+        #    self._next_region    = None
+        #    update_region        = True
+        #else:
+        #    update_region        = False
+        # 
+        #self._joint_solver.set_smpl_mesh(mesh, joints, None)
 
-        camera_pose, focus_center, axis_displacement = self._regions[self._current_region]()
+        #camera_pose, focus_center, axis_displacement = self._regions[self._current_region]()
 
-        camera_pose[:3, 3:4] = focus_center
-        align_pose = np.linalg.inv(camera_pose)
+        #camera_pose[:3, 3:4] = focus_center
+        #align_pose = np.linalg.inv(camera_pose)
 
-        mesh.apply_transform(align_pose)
-        joints = align_pose[:3, :3] @ joints + align_pose[:3, 3:4]
+        #mesh.apply_transform(align_pose)
+        #joints = align_pose[:3, :3] @ joints + align_pose[:3, 3:4]
 
-        self._joint_solver.set_smpl_mesh(mesh, joints, None)
+        #self._joint_solver.set_smpl_mesh(mesh, joints, None)
 
-        camera_pose, focus_center, axis_displacement = self._regions[self._current_region]()
-        focus_axis = camera_pose[:3, 1]
-        forward = camera_pose[:3, 2:3]
+        #camera_pose, focus_center, axis_displacement = self._regions[self._current_region]()
+        #focus_axis = camera_pose[:3, 1]
+        #forward = camera_pose[:3, 2:3]
 
-        displacement, angle = self._pointer_position
+        #displacement, angle = self._pointer_position
 
-        pose   = camera_pose
-        center = focus_center
-        up     = pose[:3, 1:2]
-        front  = pose[:3, 2:3]
+        #pose   = camera_pose
+        #center = focus_center
+        #up     = pose[:3, 1:2]
+        #front  = pose[:3, 2:3]
 
-        rotation = cv2.Rodrigues(up.reshape((-1,)) * angle)[0]
+        #rotation = cv2.Rodrigues(up.reshape((-1,)) * angle)[0]
 
-        center = center + up * displacement
-        front  = rotation @ front
+        #center = center + up * displacement
+        #front  = rotation @ front
 
-        point, face_index, vertex_index = self._joint_solver.face_solver(center, front)
+        #point, face_index, vertex_index = self._joint_solver.face_solver(center, front)
         #print([point, face_index, vertex_index])
-        if (point is not None):
-            distances = self._joint_solver.select_vertices(vertex_index, np.Inf, 3)
-            selected_indices = distances.keys()
-            filtered_faces, filtered_indices = self._joint_solver.select_complete_faces(selected_indices)
-            if (len(filtered_indices) > 0):
-                selected_indices = filtered_indices
-        else:
-            distances = None
-            selected_indices = None
+        #if (point is not None):
+        #    distances = self._joint_solver.select_vertices(vertex_index, np.Inf, 3)
+        #    selected_indices = distances.keys()
+        #    filtered_faces, filtered_indices = self._joint_solver.select_complete_faces(selected_indices)
+        #    if (len(filtered_indices) > 0):
+        #        selected_indices = filtered_indices
+        #else:
+        #    distances = None
+        #    selected_indices = None
         
-        self._scene_control.set_smpl_mesh(mesh)
-        self._scene_control.clear_group('arrows')
+        #self._scene_control.set_smpl_mesh(mesh)
+        #self._scene_control.clear_group('arrows')
 
-        camera_pose[:3, 3:4] = (focus_center + 1.2 * axis_displacement * camera_pose[:3, 2:3])
-        self._scene_control.set_camera_pose(camera_pose)
-        
-        use_offscreen = True
-        use_plane = True
-        di = 0.02
-        da = (10/180) * np.pi
+        #camera_pose[:3, 3:4] = (focus_center + 1.2 * axis_displacement * camera_pose[:3, 2:3])
+        #self._scene_control.set_camera_pose(camera_pose)
 
-        self._offscreen_renderer.smpl_mesh_set('mesh_test', mesh.vertices, joints.T, mesh.faces, self._texture_array)
-        cone = mesh_solver.mesh_create_cone(0.015, 0.04, 10)
-        sphere = mesh_solver.mesh_create_sphere(0.002)
-        I3 = np.eye(3, dtype=np.float32)
-        pose_cone =  np.eye(4, dtype=np.float32)
-        pose_sphere = np.eye(4, dtype=np.float32)
-        
-        while (use_offscreen):
-            #vertex_index = mesh.faces[face_index][snap_index]
-            smpl_frame = self._offscreen_renderer.smpl_chart_create_frame('mesh_test', 'body_center')
-            wz = self._offscreen_renderer.camera_solve_fov_z(smpl_frame.center, smpl_frame.points)
-            #self._offscreen_renderer.camera_adjust_parameters(center=smpl_frame.center, distance=wz, relative=False)
-            anchor = self._offscreen_renderer.smpl_chart_from_cylindrical('mesh_test', smpl_frame, displacement, angle)
-            #anchor = self._offscreen_renderer.smpl_chart_from_spherical('mesh_test', smpl_frame, angle, displacement)
-            #print(smpl_frame)
-            #print(smpl_frame)
-            #print([angle,displacement])
-            #cyl_local = self._offscreen_renderer.smpl_chart_to_cylindrical('mesh_test', smpl_frame, anchor.point)
-            #print([cyl_local.p1, cyl_local.p2])
-            #sph_local = self._offscreen_renderer.smpl_chart_to_spherical('mesh_test', smpl_frame, anchor.point)
-            #print([sph_local.p1, sph_local.p2])
+        #if (update_region):
+        #    viewer.set_camera_target(camera_pose, focus_axis, focus_center)
 
-            arrow_r = mesh_solver.geometry_solve_basis(I3[1:2, :], I3[2:3, :], smpl_frame.up, -anchor.direction)
-            pose_cone[:3, :3] = arrow_r.T
-            pose_cone[:3, 3:4] = (anchor.point + 0.04 * anchor.direction).T
-            
 
-            #print()
 
-            pose_sphere[:3, 3:4] = mesh_solver.mesh_closest(mesh, pose_cone[:3, 3:4].T)[0].T
 
-            self._offscreen_renderer.mesh_add('cursor', cone, pose_cone)
-            self._offscreen_renderer.mesh_add('closest', sphere, pose_sphere)
 
-            #self._offscreen_renderer.smpl_paint_brush_solid('mesh_test', anchor, 0.02, np.array([0, 255, 0, 255], dtype=np.uint8))
-            #self._offscreen_renderer.smpl_paint_brush_gradient('mesh_test', anchor, 0.01, np.array([255, 0, 0, 255], dtype=np.uint8), np.array([255, 255, 0, 255], dtype=np.uint8), 0.33)
-            #self._offscreen_renderer.smpl_paint_decal_solid('mesh_test', anchor, self._test_stamp, 0, 10000 * 2)
-            align_prior = self._offscreen_renderer.smpl_paint_decal_align_prior('mesh_test', anchor, smpl_frame.up)
-            self._offscreen_renderer.smpl_paint_decal_solid('mesh_test', anchor, self._test_text, align_prior, 0, 10000 * 2, timeout=0.1)
-            self._offscreen_renderer.smpl_paint_flush('mesh_test')
-            self._offscreen_renderer.smpl_paint_clear('mesh_test')
 
-            color, _ = self._offscreen_renderer.scene_render()
-
-            cv2.imshow('offscreen test', cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
-            key = cv2.waitKey(0) & 0xFF
-            if (key == 50): # 2
-                displacement += di
-            if (key == 51): # 3
-                displacement -= di
-            if (key == 52): # 4
-                angle += da
-            if (key == 53): # 5
-                angle -= da
-
-            if (key == 68 or key == 100): # d
-                self._offscreen_renderer.camera_adjust_parameters(yaw=10)
-            if (key == 65 or key == 97): # a
-                self._offscreen_renderer.camera_adjust_parameters(yaw=-10)
-            if (key == 87 or key == 119): # w
-                self._offscreen_renderer.camera_adjust_parameters(pitch=10)
-            if (key == 83 or key == 115): # s
-                self._offscreen_renderer.camera_adjust_parameters(pitch=-10)
-            if (key == 82 or key == 114): #r
-                self._offscreen_renderer.camera_adjust_parameters(distance=-0.1)
-            if (key == 70 or key == 102): #f
-                self._offscreen_renderer.camera_adjust_parameters(distance=0.1)
-            if (key == 85 or key == 117): #u
-                self._offscreen_renderer.camera_move_center([0, 0.1, 0], use_plane)
-            if (key == 74 or key == 106): #j
-                self._offscreen_renderer.camera_move_center([0, -0.1, 0], use_plane)
-            if (key == 73 or key == 105): #i
-                self._offscreen_renderer.camera_move_center([0, 0, 0.1], use_plane)
-            if (key == 75 or key == 107): #k
-                self._offscreen_renderer.camera_move_center([0, 0, -0.1], use_plane)
-            if (key == 78 or key == 110): #n
-                self._offscreen_renderer.camera_move_center([0.1, 0, 0], use_plane)
-            if (key == 77 or key == 109): #m
-                self._offscreen_renderer.camera_move_center([-0.1, 0, 0], use_plane)
-            if (key == 27): # esc
-                break
-
-        if (update_region):
-            viewer.set_camera_target(camera_pose, focus_axis, focus_center)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--openpose', type=str, default=None, help='Path to .json containing openpose detections (if available)')
     args = parser.parse_args()
 
-    d = demo()
+    d = demo2()
     d.run(args)
 
 if __name__ == '__main__':
