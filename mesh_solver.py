@@ -882,9 +882,9 @@ def renderer_create_settings_lamp(color=(1.0, 1.0, 1.0), intensity=3.0, name='la
     return s
 
 
-def renderer_create_settings_camera_transform(center=np.array([0, 0, 0], np.float32), yaw=0, pitch=0, distance=1, min_pitch=-75, max_pitch=75, znear=0.05, zfar=100):
+def renderer_create_settings_camera_transform(center=(0, 0, 0), yaw=0, pitch=0, distance=1, min_pitch=-75, max_pitch=75, znear=0.05, zfar=100):
     s = dict()
-    s['center'] = center
+    s['center'] = np.array(center, np.float32)
     s['yaw'] = yaw
     s['pitch'] = pitch
     s['distance'] = distance
@@ -1083,6 +1083,15 @@ class renderer_scene_control:
         wz = geometry_solve_fov_z(self._renderer.viewport_width, self._renderer.viewport_height, self._camera.fx, self._camera.fy, self._camera.cx, self._camera.cy, x, y, z, center, points)
         return wz
 
+    def camera_project_points(self, points, convention=(1, -1, -1)):
+        sx = convention[0] * convention[2]
+        sy = convention[1] * convention[2]
+        p = math_transform_points(points, self._camera_pose.T, True)
+        p = p[:, 0:2] / p[:, 2:3]
+        p[:, 0] = (self._camera.fx * sx) * p[:, 0] + self._camera.cx
+        p[:, 1] = (self._camera.fy * sy) * p[:, 1] + self._camera.cy
+        return p
+
     def render(self):
         color, depth = self._renderer.render(self._scene, pyrender.RenderFlags.RGBA)
         return (color, depth) # tuple return
@@ -1240,6 +1249,9 @@ class renderer:
     def camera_solve_fov_z(self, center, points, plane=False):
         return self._scene_control.camera_solve_fov_z(center, points, plane)
     
+    def camera_project_points(self, points, convention=(1, -1, -1)):
+        return self._scene_control.camera_project_points(points, convention)
+    
     def scene_render(self):
         return self._scene_control.render()
     
@@ -1272,14 +1284,14 @@ class renderer:
         mesh_p = mesh_to_renderer(mesh_x)
         self._scene_control.group_item_add(group, name, mesh_p, pose)
 
-    def mesh_add_smpl(self, group, name, mesh, joints, texture, pose=np.eye(4, dtype=np.float32)):
+    def mesh_add_smpl(self, group, name, mesh, joints, texture, pose):
         visual = self._tvfx_add(group, name, texture)
         mesh_a_tri = mesh
         mesh_b_tri = mesh_expand(mesh_a_tri, self._uv_transform, self._mesh_b_faces, visual)
         mesh_a_map = smpl_mesh_chart(mesh_a_tri, joints)
         self._mesh_add(group, name, mesh_a_tri, mesh_b_tri, mesh_a_map, pose)
 
-    def mesh_add_user(self, group, name, mesh, pose=np.eye(4, dtype=np.float32)):
+    def mesh_add_user(self, group, name, mesh, pose):
         self._mesh_add(group, name, mesh, None, None, pose)
 
     def mesh_set_pose(self, group, name, pose):
