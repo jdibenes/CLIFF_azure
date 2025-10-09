@@ -1299,7 +1299,7 @@ class renderer:
         self._scene_control.group_item_set_pose(group, name, pose)
 
     def mesh_get_pose(self, group, name):
-        return self._scene_control.group_item_get_pose(group, name)
+        return self._meshes[group][name][3]
 
     def mesh_present_smpl(self, group, name):
         mesh_a, mesh_b, chart, pose = self._meshes[group][name]
