@@ -1042,6 +1042,9 @@ class renderer_scene_control:
         self._node_camera = self._scene.add(self._camera, 'internal@main@camera', self._camera_pose)
         self._node_light = self._scene.add(self._light, 'internal@main@lamp', self._camera_pose)
 
+        self._kf = np.array([[self._camera.fx, self._camera.fy]], self._camera_pose.dtype)
+        self._kc = np.array([[self._camera.cx, self._camera.cy]], self._camera_pose.dtype)
+
     def _camera_set_pose(self, camera_pose):
         self._camera_pose = camera_pose
 
@@ -1084,13 +1087,10 @@ class renderer_scene_control:
         return wz
 
     def camera_project_points(self, points, convention=(1, -1, -1)):
-        sx = convention[0] * convention[2]
-        sy = convention[1] * convention[2]
-        p = math_transform_points(points, self._camera_pose.T, True)
-        p = p[:, 0:2] / p[:, 2:3]
-        p[:, 0] = (self._camera.fx * sx) * p[:, 0] + self._camera.cx
-        p[:, 1] = (self._camera.fy * sy) * p[:, 1] + self._camera.cy
-        return p
+        q = math_transform_points(points, self._camera_pose.T, True)
+        c = np.column_stack((convention[0] * q[:, 0], convention[1] * q[:, 1], convention[2] * q[:, 2]))
+        r = (c[:, 0:2] / c[:, 2:3]) * self._kf + self._kc
+        return (r, c, q) # tuple return
 
     def render(self):
         color, depth = self._renderer.render(self._scene, pyrender.RenderFlags.RGBA)
