@@ -45,9 +45,9 @@ def geometry_solve_basis(vas, vbs, vad, vbd):
 # TODO: cx, cy?
 def geometry_solve_fov_z(width, height, fx, fy, cx, cy, x, y, z, center, points):
     dp = (points - center)
-    dx = np.abs(dp @ x)
-    dy = np.abs(dp @ y)
-    dz = dp @ z
+    dx = np.abs(dp @ x.T)
+    dy = np.abs(dp @ y.T)
+    dz = dp @ z.T
     wx = dz + ((2 * fx * dx) / width)
     wy = dz + ((2 * fy * dy) / height)
     wz = np.max(np.hstack((wy, wx)))
@@ -479,7 +479,7 @@ class paint_decal_solid:
         vpd = np.array([[self._image_buffer.shape[1] // 2, self._image_buffer.shape[0] // 2, 0]], mesh_vertices.dtype)
 
         align_outward = geometry_solve_basis(self._align_prior, face_normal, self._align_axis * self._scale, self._uvx_normal)
-        align_simplex = cv2.Rodrigues(self._uvx_normal * self._angle)[0].T
+        align_simplex = cv2.Rodrigues(self._uvx_normal * -self._angle)[0]
         
         vxd = (((vxs - vps) @ align_outward) @ align_simplex) + vpd
         vxd[:, 2] = 0
@@ -1075,11 +1075,11 @@ class renderer_scene_control:
         self._camera_transform.move_center(delta_xyz, plane)
         self._camera_update_pose()
 
-    def camera_solve_fov_z(self, center, points, plane=True):
+    def camera_solve_fov_z(self, center, points, plane=False):
         pose = self._camera_transform.get_transform_local() if (not plane) else self._camera_transform.get_transform_plane()
-        x = pose[:3, 0:1]
-        y = pose[:3, 1:2]
-        z = pose[:3, 2:3]
+        x = pose[:3, 0:1].T
+        y = pose[:3, 1:2].T
+        z = pose[:3, 2:3].T
         wz = geometry_solve_fov_z(self._renderer.viewport_width, self._renderer.viewport_height, self._camera.fx, self._camera.fy, self._camera.cx, self._camera.cy, x, y, z, center, points)
         return wz
 
@@ -1088,12 +1088,14 @@ class renderer_scene_control:
         return (color, depth) # tuple return
 
     def group_item_add(self, group, name, item, pose=None):
-        nodes = self._groups.get(group, dict())
+        nodes = self._groups.get(group, None)
+        if (nodes is None):
+            nodes = dict()
+            self._groups[group] = nodes
         previous = nodes.get(name, None)
         if (previous is not None):
             self._scene.remove_node(previous)
         nodes[name] = self._scene.add(item, 'external@' + group + '@' + name, pose)
-        self._groups[group] = nodes
 
     def group_item_remove(self, group, name):
         nodes = self._groups.get(group, None)
@@ -1235,7 +1237,7 @@ class renderer:
     def camera_move_center(self, delta_xyz, plane=True):
         self._scene_control.camera_move_center(delta_xyz, plane)
 
-    def camera_solve_fov_z(self, center, points, plane=True):
+    def camera_solve_fov_z(self, center, points, plane=False):
         return self._scene_control.camera_solve_fov_z(center, points, plane)
     
     def scene_render(self):
