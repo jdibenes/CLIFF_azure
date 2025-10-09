@@ -187,6 +187,14 @@ def texture_processor(simplex_uvx, callback, tolerance=0):
 # Mesh Processing
 #------------------------------------------------------------------------------
 
+def mesh_create_cone(radius, height, sections):
+    return trimesh.creation.cone(radius=radius, height=height, sections=sections)
+
+
+def mesh_create_sphere(radius):
+    return trimesh.creation.icosphere(radius=radius)
+
+
 def mesh_create(vertices, faces, visual=None):
     return trimesh.Trimesh(vertices=vertices, faces=faces, visual=visual, process=False)
 
@@ -1184,14 +1192,6 @@ class renderer_mesh_paint:
 #------------------------------------------------------------------------------
 # Renderer
 #------------------------------------------------------------------------------
-
-def mesh_create_cone(radius, height, sections):
-    return trimesh.creation.cone(radius=radius, height=height, sections=sections)
-
-
-def mesh_create_sphere(radius):
-    return trimesh.creation.icosphere(radius=radius)
-
 
 class renderer:
     def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
