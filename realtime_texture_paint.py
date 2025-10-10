@@ -87,30 +87,16 @@ class demo:
 
 
     def _loop(self):
-        #msg_smpl_params = self._test_msg['persons'][0]['smpl_params']
-        #msg_camera_translation = self._test_msg['persons'][0]['camera_translation']
-
-        #print(self._test_msg['num_persons'])
-        #print(len(self._test_msg['persons']))
-
-        #smpl_params = { k : torch.tensor([v, v], dtype=torch.float32, device=self._device) for k, v in msg_smpl_params.items() }
-        #camera_translation = torch.tensor([msg_camera_translation, msg_camera_translation], dtype=torch.float32, device=self._device)
-
-        person_list = [self._test_msg['persons'][0], self._test_msg['persons'][0]]
+        # SMPL params to mesh
+        person_list = self._test_msg['persons']
         smpl_params, camera_translation = smpl_unpack(person_list, self._device)
         smpl_result = self._offscreen_renderer.smpl_get_mesh(smpl_params, camera_translation)
+
         vertices = smpl_result.vertices[0]
         joints = smpl_result.joints[0]
         faces = smpl_result.faces
-        vertices_world = smpl_result.vertices_world[1]
-        joints_world = smpl_result.joints_world[1]
 
-        #joints = mesh_solver.smpl_joints_to_openpose(joints)
-        #joints_world = mesh_solver.smpl_joints_to_openpose(joints_world)
-
-        # Create mesh
         mesh = mesh_solver.mesh_create(vertices, faces)
-        mesh_world = mesh_solver.mesh_create(vertices_world, faces)
 
         # Compute pose to set mesh upright
         frame_0 = mesh_solver.smpl_mesh_chart_openpose(mesh, joints).create_frame('body_center')
@@ -123,7 +109,6 @@ class demo:
 
         # Add SMPL mesh to the main scene
         self._offscreen_renderer.mesh_add_smpl('smpl', 'patient', mesh, joints, self._texture_array, smpl_mesh_pose)
-        self._offscreen_renderer.mesh_add_smpl('smpl', 'duplicate', mesh_world, joints_world, self._texture_array_2, smpl_mesh_pose)
 
         # Map current cylindrical coordinates to SMPL mesh point and face
         smpl_frame = self._offscreen_renderer.smpl_chart_create_frame('smpl', 'patient', self._regions[self._region_index])
@@ -174,7 +159,7 @@ class demo:
 
         # Add meshes to display, update poses and textures
         self._offscreen_renderer.mesh_present_smpl('smpl', 'patient')
-        self._offscreen_renderer.mesh_present_smpl('smpl', 'duplicate')
+        
         self._offscreen_renderer.mesh_present_user('ui', 'cursor')
         self._offscreen_renderer.mesh_present_user('ui', 'closest')
 
@@ -197,12 +182,11 @@ class demo:
         if (key == 49): # 1
             self._region_index = (self._region_index + 1) % len(self._regions)
             region = self._regions[self._region_index]
-            print(f'region: {region}')
             smpl_frame = self._offscreen_renderer.smpl_chart_create_frame('smpl', 'patient', region)
             focus_center = mesh_solver.math_transform_points(smpl_frame.center, smpl_mesh_pose.T, False)
             focus_points = mesh_solver.math_transform_points(smpl_frame.points, smpl_mesh_pose.T, False)
             wz = self._offscreen_renderer.camera_solve_fov_z(focus_center, focus_points, False)
-            self._offscreen_renderer.camera_adjust_parameters(center=focus_center, distance=wz, relative=False)
+            self._offscreen_renderer.camera_adjust_parameters(center=focus_center, distance=1.25*wz, relative=False)
             self._displacement = 0
             self._angle = 0
             
@@ -335,3 +319,21 @@ def create_colormap():
 #    self._pointer_position = [displacement, angle]
 # global transform
 #p[:3, 3:4] = (center + wz * z)
+
+#msg_smpl_params = self._test_msg['persons'][0]['smpl_params']
+#msg_camera_translation = self._test_msg['persons'][0]['camera_translation']
+
+#print(self._test_msg['num_persons'])
+#print(len(self._test_msg['persons']))
+
+#smpl_params = { k : torch.tensor([v, v], dtype=torch.float32, device=self._device) for k, v in msg_smpl_params.items() }
+#camera_translation = torch.tensor([msg_camera_translation, msg_camera_translation], dtype=torch.float32, device=self._device)
+        #vertices_world = smpl_result.vertices_world[1]
+        #joints_world = smpl_result.joints_world[1]
+        #joints = mesh_solver.smpl_joints_to_openpose(joints)
+        #joints_world = mesh_solver.smpl_joints_to_openpose(joints_world)
+        #mesh_world = mesh_solver.mesh_create(vertices_world, faces)
+        #self._offscreen_renderer.mesh_add_smpl('smpl', 'duplicate', mesh_world, joints_world, self._texture_array_2, smpl_mesh_pose)
+        #self._offscreen_renderer.mesh_present_smpl('smpl', 'duplicate')
+        
+        
