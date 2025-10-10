@@ -679,8 +679,8 @@ class smpl_mesh_chart_openpose(mesh_chart):
         front = math_normalize(front)[0]
         up    = math_normalize(up)[0]
 
-        center = (ankle + bigtoe) * 0.5
-        length = np.linalg.norm(ankle - bigtoe)
+        center = (ankle + smalltoe) * 0.5
+        length = np.linalg.norm(ankle - smalltoe)
         points = np.vstack((bigtoe, smalltoe, ankle, heel))
 
         return mesh_chart_frame(left, up, front, center, length, points)
