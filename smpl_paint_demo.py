@@ -28,7 +28,7 @@ class demo:
         # Settings
         self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-        self._smpl_test_message_path = './test_msg.txt'
+        self._smpl_test_message_path = './data/test_camerahmr_message.txt'
         self._smpl_model_path = './data/smpl/SMPL_NEUTRAL.pkl'
         self._smpl_uv_path = './data/smpl_uv.obj'
         self._smpl_texture_path = './data/textures/f_01_alb.002_1k.png'
@@ -219,7 +219,7 @@ class demo:
                 color = cv2.circle(color, center, self._joint_projection_radius, self._joint_projection_color, -1)
 
         # Show rendered image
-        cv2.imshow('offscreen test', cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
+        cv2.imshow('SMPL Paint Demo', cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
 
         # Process keyboard input
         key = cv2.waitKey(1) & 0xFF
