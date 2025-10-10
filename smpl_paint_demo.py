@@ -1,3 +1,18 @@
+#------------------------------------------------------------------------------
+# SMPL paint demo
+#
+# Keyboard Controls:
+# 1: Focus next SMPL region
+# 2/3: Increment/Decrement Cursor offset
+# 4/5: Increment/Decrement Cursor yaw
+# d/a: Increment/Decrement Camera yaw
+# w/s: Increment/Decrement Camera pitch
+# r/f: Zoom In/Out
+# n/m: Camera move left/right
+# u/j: Camera move up/down
+# i/k: Camera move forward/backward
+# Esc: Quit
+#------------------------------------------------------------------------------
 
 import time
 import json
