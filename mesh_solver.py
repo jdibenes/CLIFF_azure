@@ -617,6 +617,14 @@ class mesh_chart_frame:
         pitch = np.arctan2(ny, nxz)
         return mesh_chart_local(yaw, pitch, offset, nx, ny, nz, xz, nxz)
 
+    def to_pose(self):
+        pose = np.eye(4, dtype=self.center.dtype)
+        pose[0:1, :3] = self.left
+        pose[1:2, :3] = self.up
+        pose[2:3, :3] = self.front
+        pose[3:4, :3] = self.center
+        return pose
+
 
 class mesh_chart:
     def __init__(self, mesh):
@@ -644,6 +652,9 @@ class mesh_chart:
 
     def to_spherical(self, frame, point):
         return frame.to_spherical(point)
+    
+    def to_pose(self, frame):
+        return frame.to_pose()
 
 
 #------------------------------------------------------------------------------
@@ -1393,6 +1404,10 @@ class renderer:
         mesh_a, mesh_b, chart, pose = self._meshes[group][name]
         local_point = math_transform_points(point, pose.T, True)
         return chart.to_spherical(frame, local_point)
+    
+    def smpl_chart_to_pose(self, group, name, frame):
+        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+        return chart.to_pose(frame)
 
     def smpl_paint_brush_solid(self, group, name, anchor, size, color, fill_test=0.0, timeout=0.05, steps=1, tolerance=0) -> bool:
         mesh_a, mesh_b, chart, pose = self._meshes[group][name]
