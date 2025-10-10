@@ -569,6 +569,40 @@ class mesh_chart_frame:
         self.length = length
         self.points = points
 
+    def decompose(self, point):
+        offset = point - self.center
+        ny = offset @ self.up.T
+        xz = offset - ny * self.up
+        nxz = np.linalg.norm(xz)
+        nx = self.left @ xz.T
+        nz = self.front @ xz.T
+        return (offset, nx, ny, nz, xz, nxz) # tuple return
+
+    def from_cylindrical(self, mesh, displacement, yaw):
+        position = self.center + displacement * self.up
+        orientation = cv2.Rodrigues(self.up * -yaw)[0]
+        direction = self.front @ orientation
+        point, face_index = mesh_raycast(mesh, position, direction)
+        return mesh_chart_point(point, face_index, position, direction, orientation)
+    
+    def from_spherical(self, mesh, yaw, pitch):
+        position = self.center
+        orientation = cv2.Rodrigues(self.left * pitch)[0] @ cv2.Rodrigues(self.up * -yaw)[0]
+        direction = self.front @ orientation
+        point, face_index = mesh_raycast(mesh, position, direction)
+        return mesh_chart_point(point, face_index, position, direction, orientation)
+    
+    def to_cylindrical(self, point):
+        offset, nx, ny, nz, xz, nxz = self.decompose(point)
+        displacement = ny
+        yaw = np.arctan2(nx, nz)
+        return mesh_chart_local(displacement, yaw, offset, nx, ny, nz, xz, nxz)
+
+    def to_spherical(self, point):
+        offset, nx, ny, nz, xz, nxz = self.decompose(point)
+        yaw = np.arctan2(nx, nz)
+        pitch = np.arctan2(ny, nxz)
+        return mesh_chart_local(yaw, pitch, offset, nx, ny, nz, xz, nxz)
 
 class mesh_chart_point:
     def __init__(self, point, face_index, position, direction, orientation):
@@ -604,39 +638,16 @@ class mesh_chart:
         return frame
     
     def from_cylindrical(self, frame, displacement, yaw):
-        position = frame.center + displacement * frame.up
-        orientation = cv2.Rodrigues(frame.up * -yaw)[0]
-        direction = frame.front @ orientation
-        point, face_index = mesh_raycast(self._mesh, position, direction)
-        return mesh_chart_point(point, face_index, position, direction, orientation)
+        return frame.from_cylindrical(self._mesh, displacement, yaw)
     
     def from_spherical(self, frame, yaw, pitch):
-        position = frame.center
-        orientation = cv2.Rodrigues(frame.left * pitch)[0] @ cv2.Rodrigues(frame.up * -yaw)[0]
-        direction = frame.front @ orientation
-        point, face_index = mesh_raycast(self._mesh, position, direction)
-        return mesh_chart_point(point, face_index, position, direction, orientation)
-
-    def _split_up(self, frame, point):
-        offset = point - frame.center
-        ny = offset @ frame.up.T
-        xz = offset - ny * frame.up
-        nxz = np.linalg.norm(xz)
-        nx = frame.left @ xz.T
-        nz = frame.front @ xz.T
-        return (offset, nx, ny, nz, xz, nxz) # tuple return
+        return frame.from_spherical(self._mesh, yaw, pitch)
 
     def to_cylindrical(self, frame, point):
-        offset, nx, ny, nz, xz, nxz = self._split_up(frame, point)
-        displacement = ny
-        yaw = np.arctan2(nx, nz)
-        return mesh_chart_local(displacement, yaw, offset, nx, ny, nz, xz, nxz)
+        return frame.to_cylindrical(point)
 
     def to_spherical(self, frame, point):
-        offset, nx, ny, nz, xz, nxz = self._split_up(frame, point)
-        yaw = np.arctan2(nx, nz)
-        pitch = np.arctan2(ny, nxz)
-        return mesh_chart_local(yaw, pitch, offset, nx, ny, nz, xz, nxz)
+        return frame.to_spherical(point)
 
 
 #------------------------------------------------------------------------------
