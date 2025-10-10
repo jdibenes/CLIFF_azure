@@ -1,30 +1,14 @@
 
-import cv2
-import argparse
-import numpy as np
 import time
 import json
+import cv2
+import numpy as np
 import torch
 import mesh_solver
-import visualizer
-
-from pytorch3d import transforms
-from models.smpl import SMPL
-from common import constants
-from losses import *
-from smplify import SMPLify
-from models.cliff_hr48.cliff import CLIFF as cliff_hr48
-from common.utils import strip_prefix_if_present, cam_crop2full
-# from common.mocap_dataset import MocapDataset  # not used in this live demo
 
 
-class demo2:
-    def run(self, args):
-        # Set up the webcam
-        #self._cap = visualizer.camera_opencv()
-        self._cap = visualizer.camera_null()
-        self._cap.open()
-
+class demo:
+    def run(self):
         # Create offscreen renderer
         renderer_width = 1280
         renderer_height = 720
@@ -52,7 +36,7 @@ class demo2:
         # Load CLIFF and SMPL
         self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         print(f'Using device: {self._device}')
-        self._offscreen_renderer.smpl_load_model(self._device)
+        self._offscreen_renderer.smpl_load_model('data/smpl/SMPL_NEUTRAL.pkl', 10, self._device)
         with open('./test_msg.txt', 'r') as json_file:
             self._test_msg = json.load(json_file)
         
@@ -84,8 +68,6 @@ class demo2:
                 start = end
                 count = 0
 
-        # Close camera
-        self._cap.close()
 
     def _loop(self):
         smpl_params = self._test_msg['persons'][0]['smpl_params']
@@ -93,11 +75,9 @@ class demo2:
         smpl_params = { k : torch.tensor([v], dtype=torch.float32, device=self._device) for k, v in smpl_params.items() }
         camera_translation = torch.tensor([camera_translation], dtype=torch.float32, device=self._device)
 
-        vertices, joints, faces = self._offscreen_renderer.smpl_get_mesh(smpl_params)
-        pred_vertices_world = (vertices + camera_translation.unsqueeze(1)).detach().cpu().numpy()
-
-        vertices = vertices[0].cpu().numpy()
-        joints = joints[0].cpu().numpy()
+        vertices, vertices_world, faces, joints, joints_world = self._offscreen_renderer.smpl_get_mesh(smpl_params, camera_translation)
+        vertices = vertices[0]
+        joints = joints[0]
 
         joints = mesh_solver.smpl_joints_to_openpose(joints)
 
@@ -233,12 +213,7 @@ class demo2:
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--openpose', type=str, default=None, help='Path to .json containing openpose detections (if available)')
-    args = parser.parse_args()
-
-    d = demo2()
-    d.run(args)
+    demo().run()
 
 
 if __name__ == '__main__':
