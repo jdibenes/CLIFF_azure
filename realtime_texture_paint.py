@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import torch
 import trimesh
-import mesh_solver
+import smplpact
 
 
 def smpl_unpack(person_list, device):
@@ -23,26 +23,26 @@ class demo:
         viewport_width = 1280
         viewport_height = 720
         fov_vertical = np.pi / 3
-        fxy = mesh_solver.geometry_fov_to_f(fov_vertical, viewport_height)
+        fxy = smplpact.geometry_fov_to_f(fov_vertical, viewport_height)
 
-        cfg_offscreen = mesh_solver.renderer_create_settings_offscreen(viewport_width, viewport_height)
-        cfg_scene = mesh_solver.renderer_create_settings_scene()
-        cfg_camera = mesh_solver.renderer_create_settings_camera(fxy, fxy, viewport_width // 2, viewport_height // 2)
-        cfg_camera_transform = mesh_solver.renderer_create_settings_camera_transform()
-        cfg_lamp = mesh_solver.renderer_create_settings_lamp()
+        cfg_offscreen = smplpact.renderer_create_settings_offscreen(viewport_width, viewport_height)
+        cfg_scene = smplpact.renderer_create_settings_scene()
+        cfg_camera = smplpact.renderer_create_settings_camera(fxy, fxy, viewport_width // 2, viewport_height // 2)
+        cfg_camera_transform = smplpact.renderer_create_settings_camera_transform()
+        cfg_lamp = smplpact.renderer_create_settings_lamp()
         
-        self._offscreen_renderer = mesh_solver.renderer(cfg_offscreen, cfg_scene, cfg_camera, cfg_camera_transform, cfg_lamp)
+        self._offscreen_renderer = smplpact.renderer(cfg_offscreen, cfg_scene, cfg_camera, cfg_camera_transform, cfg_lamp)
 
         # Load textures and UV map
-        self._texture_array = mesh_solver.texture_load_image('./data/textures/f_01_alb.002_1k.png')
-        self._texture_array_2 = mesh_solver.texture_load_image('./data/textures/smpl_uv_20200910.png', False)
-        self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
+        self._texture_array = smplpact.texture_load_image('./data/textures/f_01_alb.002_1k.png')
+        self._texture_array_2 = smplpact.texture_load_image('./data/textures/smpl_uv_20200910.png', False)
+        self._test_stamp = smplpact.texture_load_image('./data/textures/stamp_test.jpg')
         self._offscreen_renderer.smpl_load_uv('./data/smpl_uv.obj', self._texture_array.shape)
 
         # Create sample text texture
-        font = mesh_solver.texture_load_font('arial.ttf', 512)
-        self._test_text = mesh_solver.texture_create_multiline_text(['Sample', 'Text'], font, (255, 0, 0, 255), (255, 255, 255, 255), 1, 20)
-        self._test_text = mesh_solver.texture_pad(self._test_text, 0.05, 0.1, (255, 255, 255, 255))
+        font = smplpact.texture_load_font('arial.ttf', 512)
+        self._test_text = smplpact.texture_create_multiline_text(['Sample', 'Text'], font, (255, 0, 0, 255), (255, 255, 255, 255), 1, 20)
+        self._test_text = smplpact.texture_pad(self._test_text, 0.05, 0.1, (255, 255, 255, 255))
 
         # Load SMPL model
         self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -99,11 +99,11 @@ class demo:
         smpl_vertices = smpl_result.vertices[0]
         smpl_joints = smpl_result.joints[0]
         smpl_faces = smpl_result.faces
-        smpl_mesh = mesh_solver.mesh_create(smpl_vertices, smpl_faces, visual=None)
+        smpl_mesh = smplpact.mesh_create(smpl_vertices, smpl_faces, visual=None)
 
         # Compute pose to set mesh upright
         # Poses convert from object to world
-        smpl_mesh_pose = np.linalg.inv(mesh_solver.smpl_mesh_chart_openpose(smpl_mesh, smpl_joints).create_frame('body_center').to_pose()).T
+        smpl_mesh_pose = np.linalg.inv(smplpact.smpl_mesh_chart_openpose(smpl_mesh, smpl_joints).create_frame('body_center').to_pose()).T
 
         # Add SMPL mesh to the main scene
         smpl_mesh_id = self._offscreen_renderer.mesh_add_smpl('smpl', 'patient', smpl_mesh, smpl_joints, self._texture_array, smpl_mesh_pose)
@@ -116,8 +116,8 @@ class demo:
         if (smpl_next_region != self._smpl_region):
             smpl_frame = self._offscreen_renderer.smpl_chart_create_frame(smpl_mesh_id, smpl_next_region)
             
-            focus_center = mesh_solver.math_transform_points(smpl_frame.center, smpl_mesh_pose.T, inverse=False)
-            focus_points = mesh_solver.math_transform_points(smpl_frame.points, smpl_mesh_pose.T, inverse=False)
+            focus_center = smplpact.math_transform_points(smpl_frame.center, smpl_mesh_pose.T, inverse=False)
+            focus_points = smplpact.math_transform_points(smpl_frame.points, smpl_mesh_pose.T, inverse=False)
             focus_distance = self._offscreen_renderer.camera_solve_fov_z(focus_center, focus_points)
 
             self._offscreen_renderer.camera_adjust_parameters(center=focus_center, distance=self._focus_factor * focus_distance, relative=False)
@@ -133,8 +133,8 @@ class demo:
         # smpl_anchor.point is None when outside mesh
         local_cursor_orientation = np.vstack((np.cross(smpl_frame.up, -cursor_anchor.direction), smpl_frame.up, -cursor_anchor.direction))
         local_cursor_position = (cursor_anchor.point + self._cursor_height * cursor_anchor.direction) if (cursor_anchor.point is not None) else cursor_anchor.position
-        self._cursor_pose[0:3, :3] = mesh_solver.math_transform_bearings(local_cursor_orientation, smpl_mesh_pose.T, inverse=False)
-        self._cursor_pose[3:4, :3] = mesh_solver.math_transform_points(local_cursor_position, smpl_mesh_pose.T, inverse=False)
+        self._cursor_pose[0:3, :3] = smplpact.math_transform_bearings(local_cursor_orientation, smpl_mesh_pose.T, inverse=False)
+        self._cursor_pose[3:4, :3] = smplpact.math_transform_points(local_cursor_position, smpl_mesh_pose.T, inverse=False)
         
         # Add cursor to the main scene
         cursor_pose = self._cursor_pose.T
@@ -178,7 +178,7 @@ class demo:
 
         # Render focused joints
         color = color.copy()
-        world_points = mesh_solver.math_transform_points(smpl_frame.points, smpl_mesh_pose.T, inverse=False)
+        world_points = smplpact.math_transform_points(smpl_frame.points, smpl_mesh_pose.T, inverse=False)
         image_points, local_points, camera_points = self._offscreen_renderer.camera_project_points(world_points, convention=(1, -1, -1))
 
         for i in range(0, image_points.shape[0]):
