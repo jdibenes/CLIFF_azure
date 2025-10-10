@@ -361,12 +361,12 @@ class mesh_neighborhood_operation_brush:
         vertex_indices = self._mesh_faces[face_index]
         self._simplex_3d = self._mesh_vertices[vertex_indices, :]
         self._level = level
+        self._pixels_painted = 0
         texture_processor(self._mesh_uvx[vertex_indices, :], self._paint_uv, self._tolerance)
         return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
     
     def _paint_uv(self, pixels, weights):
         distances = np.linalg.norm((weights @ self._simplex_3d) - self._origin, axis=1)
-        self._pixels_painted = 0
         for target in self._targets:
             self._pixels_painted += target(pixels, distances, self._level)
 
@@ -390,6 +390,7 @@ class mesh_neighborhood_operation_decal:
         command = self._target(self._mesh_vertices, self._face_normal, self._origin, self._vertex_indices_b, self._vertex_indices_a, None, None, self._level)
         if (command != mesh_neighborhood_processor_command.EXPAND):
             return command
+        self._pixels_painted = 0
         texture_processor(self._mesh_uvx[self._vertex_indices_b, :], self._paint_uv, self._tolerance)
         return mesh_neighborhood_processor_command.EXPAND if (self._pixels_painted > 0) else mesh_neighborhood_processor_command.IGNORE
 
