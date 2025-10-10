@@ -3,6 +3,7 @@ import cv2
 import argparse
 import numpy as np
 import time
+import json
 import torch
 import mesh_solver
 import visualizer
@@ -94,7 +95,9 @@ class demo2:
         frame = frame_data['color']        
         self._device, self._cliff_model, self._bbox_info, self._smpl = create_model(frame.shape)
         self._offscreen_renderer.smpl_load_model(self._device)
-
+        with open('./test_msg.txt', 'r') as json_file:
+            self._test_msg = json.load(json_file)
+        
         # Create UI elements
         self._cone = mesh_solver.mesh_create_cone(0.015, 0.04, 10)
         self._sphere = mesh_solver.mesh_create_sphere(0.003)
@@ -127,25 +130,14 @@ class demo2:
         self._cap.close()
 
     def _loop(self):
-        # Get next frame
-        frame_data = self._cap.read()
-        frame = frame_data['color']
-        norm_img = preprocess_frame(frame, target_size=(224, 224)).to(self._device)
+        smpl_params = self._test_msg['persons'][0]['smpl_params']
+        camera_translation = self._test_msg['persons'][0]['camera_translation']
+        smpl_params = { k : torch.tensor([v], dtype=torch.float32, device=self._device) for k, v in smpl_params.items() }
+        camera_translation = torch.tensor([camera_translation], dtype=torch.float32, device=self._device)
 
-        # Run the CLIFF model.
-        with torch.no_grad():
-            pred_rotmat, pred_betas, pred_cam_crop = self._cliff_model(norm_img, self._bbox_info)
-        
-        smpl_poses = transforms.matrix_to_axis_angle(pred_rotmat).contiguous().view(-1, 72)
+        vertices, joints, faces = self._offscreen_renderer.smpl_get_mesh(smpl_params)
+        pred_vertices_world = (vertices + camera_translation.unsqueeze(1)).detach().cpu().numpy()
 
-        #with torch.no_grad():
-        #    pred_output = self._smpl(betas=pred_betas, body_pose=smpl_poses[:, 3:], global_orient=smpl_poses[:, :3], pose2rot=True)
-        
-        #vertices = pred_output.vertices.cpu().detach().numpy()[0]
-        #joints = pred_output.joints.cpu().detach().numpy()[0]
-        #faces = self._smpl.faces
-
-        vertices, joints, faces = self._offscreen_renderer.smpl_get_output_mesh(pred_betas)
         vertices = vertices[0].cpu().numpy()
         joints = joints[0].cpu().numpy()
 
