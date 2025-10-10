@@ -1228,15 +1228,19 @@ class renderer:
         self._meshes = dict()
         self._cswvfx = dict()
 
-    def smpl_load_model(self, device):
-        self.smpl_model = smplx.SMPLLayer(model_path='data/smpl/SMPL_NEUTRAL.pkl', num_betas=10).to(device)
+    def smpl_load_model(self, model_path, num_betas, device):
+        self.smpl_model = smplx.SMPLLayer(model_path=model_path, num_betas=num_betas).to(device)
 
-    def smpl_get_mesh(self, smpl_parameters):
+    def smpl_get_mesh(self, smpl_parameters, camera_translation):
         smpl_output = self.smpl_model(**smpl_parameters)
-        pred_keypoints_3d = smpl_output.joints
-        pred_vertices = smpl_output.vertices
-        return pred_vertices, pred_keypoints_3d, self.smpl_model.faces
-
+        vertices = smpl_output.vertices
+        joints = smpl_output.joints
+        t = camera_translation.unsqueeze(1)
+        vertices_world = (vertices + t).detach().cpu().numpy()
+        joints_world = (joints + t).detach().cpu().numpy()
+        vertices = vertices.cpu().numpy()
+        joints = joints.cpu().numpy()
+        return vertices, vertices_world, self.smpl_model.faces, joints, joints_world
 
     def smpl_load_uv(self, filename_uv, texture_shape):
         self._uv_transform, self._mesh_a_faces, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
