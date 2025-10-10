@@ -560,6 +560,27 @@ def painter_create_decal(mesh_a, mesh_b, mesh_uvx, uv_transform, face_index, ori
 # Mesh Chart
 #------------------------------------------------------------------------------
 
+class mesh_chart_point:
+    def __init__(self, point, face_index, position, direction, orientation):
+        self.point = point
+        self.face_index = face_index
+        self.position = position
+        self.direction = direction
+        self.orientation = orientation
+
+
+class mesh_chart_local:
+    def __init__(self, p1, p2, offset, nx, ny, nz, xz, nxz):
+        self.p1 = p1
+        self.p2 = p2
+        self.offset = offset
+        self.nx = nx
+        self.ny = ny
+        self.nz = nz
+        self.xz = xz
+        self.nxz = nxz
+
+
 class mesh_chart_frame:
     def __init__(self, left, up, front, center, length, points):
         self.left = left
@@ -604,26 +625,6 @@ class mesh_chart_frame:
         pitch = np.arctan2(ny, nxz)
         return mesh_chart_local(yaw, pitch, offset, nx, ny, nz, xz, nxz)
 
-class mesh_chart_point:
-    def __init__(self, point, face_index, position, direction, orientation):
-        self.point = point
-        self.face_index = face_index
-        self.position = position
-        self.direction = direction
-        self.orientation = orientation
-
-
-class mesh_chart_local:
-    def __init__(self, p1, p2, offset, nx, ny, nz, xz, nxz):
-        self.p1 = p1
-        self.p2 = p2
-        self.offset = offset
-        self.nx = nx
-        self.ny = ny
-        self.nz = nz
-        self.xz = xz
-        self.nxz = nxz
-
 
 class mesh_chart:
     def __init__(self, mesh):
@@ -636,6 +637,9 @@ class mesh_chart:
             frame = operator.methodcaller('_create_frame_' + region)(self)
             self._cache[region] = frame
         return frame
+    
+    def decompose(self, frame, point):
+        return frame.decompose(point)
     
     def from_cylindrical(self, frame, displacement, yaw):
         return frame.from_cylindrical(self._mesh, displacement, yaw)
