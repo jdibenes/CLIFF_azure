@@ -4,7 +4,16 @@ import json
 import cv2
 import numpy as np
 import torch
+import trimesh
 import mesh_solver
+
+
+def mesh_create_cone(radius, height, sections):
+    return trimesh.creation.cone(radius=radius, height=height, sections=sections)
+
+
+def mesh_create_sphere(radius):
+    return trimesh.creation.icosphere(radius=radius)
 
 
 def smpl_unpack(person_list, device):
@@ -49,8 +58,8 @@ class demo:
             self._test_msg = json.load(json_file)
         
         # Create UI elements
-        self._cone = mesh_solver.mesh_create_cone(0.015, 0.04, 10)
-        self._sphere = mesh_solver.mesh_create_sphere(0.003)
+        self._cone = mesh_create_cone(0.015, 0.04, 10)
+        self._sphere = mesh_create_sphere(0.003)
         self._pose_cone =  np.eye(4, dtype=np.float32)
         self._pose_sphere = np.eye(4, dtype=np.float32)
 
@@ -89,11 +98,12 @@ class demo:
 
         person_list = [self._test_msg['persons'][0], self._test_msg['persons'][0]]
         smpl_params, camera_translation = smpl_unpack(person_list, self._device)
-        vertices, vertices_world, faces, joints, joints_world = self._offscreen_renderer.smpl_get_mesh(smpl_params, camera_translation)
-        vertices = vertices[0]
-        joints = joints[0]
-        vertices_world = vertices_world[1]
-        joints_world = joints_world[1]
+        smpl_result = self._offscreen_renderer.smpl_get_mesh(smpl_params, camera_translation)
+        vertices = smpl_result.vertices[0]
+        joints = smpl_result.joints[0]
+        faces = smpl_result.faces
+        vertices_world = smpl_result.vertices_world[1]
+        joints_world = smpl_result.joints_world[1]
 
         #joints = mesh_solver.smpl_joints_to_openpose(joints)
         #joints_world = mesh_solver.smpl_joints_to_openpose(joints_world)
