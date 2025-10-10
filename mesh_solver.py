@@ -1231,8 +1231,8 @@ class renderer:
     def smpl_load_model(self, device):
         self.smpl_model = smplx.SMPLLayer(model_path='data/smpl/SMPL_NEUTRAL.pkl', num_betas=10).to(device)
 
-    def smpl_get_output_mesh(self, betas):
-        smpl_output = self.smpl_model(betas=betas)
+    def smpl_get_mesh(self, smpl_parameters):
+        smpl_output = self.smpl_model(**smpl_parameters)
         pred_keypoints_3d = smpl_output.joints
         pred_vertices = smpl_output.vertices
         return pred_vertices, pred_keypoints_3d, self.smpl_model.faces
