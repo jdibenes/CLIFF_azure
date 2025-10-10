@@ -658,13 +658,6 @@ class mesh_chart:
 # SMPL Chart
 #------------------------------------------------------------------------------
 
-SMPL_TO_OPENPOSE = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4, 7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
-
-
-def smpl_joints_to_openpose(joints):
-    return joints[SMPL_TO_OPENPOSE, :]
-
-
 class smpl_mesh_chart_openpose(mesh_chart):
     def __init__(self, mesh, joints):
         super().__init__(mesh)
@@ -866,27 +859,22 @@ class smpl_mesh_chart_openpose(mesh_chart):
 
 
 class smpl_model:
-    def load(self, model_path, num_betas, device):
-        self._smpl_model = smplx.SMPLLayer(model_path=model_path, num_betas=num_betas).to(device)
+    _SMPL_TO_OPENPOSE = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4, 7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
 
-    def to_mesh(self, smpl_params, camera_translation):
+    def __init__(self, model_path, num_betas, device):
+        self._smpl_model = smplx.SMPLLayer(model_path=model_path, num_betas=num_betas).to(device)
+        self._smpl_to_open_pose = torch.tensor(smpl_model._SMPL_TO_OPENPOSE, dtype=torch.long, device=device)
+
+    def to_mesh(self, smpl_params, camera_translation, openpose_joints=True):
         smpl_output = self._smpl_model(**smpl_params)
         vertices = smpl_output.vertices
-        joints = smpl_output.joints
+        joints = smpl_output.joints.index_select(1, self._smpl_to_open_pose) if (openpose_joints) else smpl_output.joints
         t = camera_translation.unsqueeze(1)
         vertices_world = (vertices + t).detach().cpu().numpy()
         joints_world = (joints + t).detach().cpu().numpy()
         vertices = vertices.cpu().numpy()
         joints = joints.cpu().numpy()
         return vertices, vertices_world, self._smpl_model.faces, joints, joints_world
-
-    def unpack(self, person_list, device):
-        global_orient = torch.tensor([person['smpl_params']['global_orient'] for person in person_list], dtype=torch.float32, device=device)
-        body_pose = torch.tensor([person['smpl_params']['body_pose'] for person in person_list], dtype=torch.float32, device=device)
-        betas = torch.tensor([person['smpl_params']['betas'] for person in person_list], dtype=torch.float32, device=device)
-        smpl_params = { 'global_orient' : global_orient, 'body_pose' : body_pose, 'betas' : betas }
-        camera_translation = torch.tensor([person['camera_translation'] for person in person_list], dtype=torch.float32, device=device)
-        return smpl_params, camera_translation
 
 
 #------------------------------------------------------------------------------
@@ -1265,20 +1253,15 @@ class renderer_mesh_paint:
 class renderer:
     def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
         self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp)
-        self._smpl_control = smpl_model()
         self._meshes = dict()
         self._cswvfx = dict()
 
     def smpl_load_model(self, model_path, num_betas, device):
-        self._smpl_control.load(model_path, num_betas, device)
+        self._smpl_control = smpl_model(model_path, num_betas, device)
 
     def smpl_get_mesh(self, smpl_params, camera_translation):
         return self._smpl_control.to_mesh(smpl_params, camera_translation)
     
-    def smpl_unpack(self, person_list, device):
-        return self._smpl_control.unpack(person_list, device)
-
-
     def smpl_load_uv(self, filename_uv, texture_shape):
         self._uv_transform, self._mesh_a_faces, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
         self._mesh_b_uvx = texture_uv_to_uvx(self._mesh_b_uv.copy(), texture_shape)
