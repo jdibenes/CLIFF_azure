@@ -199,14 +199,6 @@ def texture_processor(simplex_uvx, callback, tolerance=0):
 # Mesh Processing
 #------------------------------------------------------------------------------
 
-def mesh_create_cone(radius, height, sections):
-    return trimesh.creation.cone(radius=radius, height=height, sections=sections)
-
-
-def mesh_create_sphere(radius):
-    return trimesh.creation.icosphere(radius=radius)
-
-
 def mesh_create(vertices, faces, visual=None):
     return trimesh.Trimesh(vertices=vertices, faces=faces, visual=visual, process=False)
 
@@ -858,6 +850,15 @@ class smpl_mesh_chart_openpose(mesh_chart):
         return self._template_frame_lower_arm(wrist, elbow, shoulder)
 
 
+class smpl_model_result:
+    def __init__(self, vertices, vertices_world, faces, joints, joints_world):
+        self.vertices = vertices
+        self.vertices_world = vertices_world
+        self.faces = faces
+        self.joints = joints
+        self.joints_world = joints_world
+
+
 class smpl_model:
     _SMPL_TO_OPENPOSE = [24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4, 7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
 
@@ -874,7 +875,7 @@ class smpl_model:
         joints_world = (joints + t).detach().cpu().numpy()
         vertices = vertices.cpu().numpy()
         joints = joints.cpu().numpy()
-        return vertices, vertices_world, self._smpl_model.faces, joints, joints_world
+        return smpl_model_result(vertices, vertices_world, self._smpl_model.faces, joints, joints_world)
 
 
 #------------------------------------------------------------------------------
@@ -1249,7 +1250,6 @@ class renderer_mesh_paint:
 # Renderer
 #------------------------------------------------------------------------------
 
-# TODO: SMPL stuff
 class renderer:
     def __init__(self, settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp):
         self._scene_control = renderer_scene_control(settings_offscreen, settings_scene, settings_camera, settings_camera_transform, settings_lamp)
@@ -1259,7 +1259,7 @@ class renderer:
     def smpl_load_model(self, model_path, num_betas, device):
         self._smpl_control = smpl_model(model_path, num_betas, device)
 
-    def smpl_get_mesh(self, smpl_params, camera_translation):
+    def smpl_get_mesh(self, smpl_params, camera_translation) -> smpl_model_result:
         return self._smpl_control.to_mesh(smpl_params, camera_translation)
     
     def smpl_load_uv(self, filename_uv, texture_shape):
