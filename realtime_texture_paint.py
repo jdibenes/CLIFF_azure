@@ -18,47 +18,6 @@ from common.utils import strip_prefix_if_present, cam_crop2full
 # from common.mocap_dataset import MocapDataset  # not used in this live demo
 
 
-def preprocess_frame(frame, target_size=(224, 224)):
-    """
-    Preprocess the input frame (BGR) to a normalized tensor.
-    Returns norm_img as a tensor of shape (1, 3, H, W) in float32.
-    """
-    resized = cv2.resize(frame, target_size)
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB) / 255.0
-    norm_img = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float()
-    return norm_img
-
-
-def create_model(img_shape):
-    # Device selection
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    print(f'Using device: {device}')
-
-    # Load the pretrained CLIFF model.
-    cliff = eval("cliff_hr48")
-    cliff_model = cliff('./data/smpl_mean_params.npz').to(device)
-    state_dict = torch.load('./data/ckpt/hr48-PA43.0_MJE69.0_MVE81.2_3dpw.pt')['model']
-    state_dict = strip_prefix_if_present(state_dict, prefix="module.")
-    cliff_model.load_state_dict(state_dict, strict=True)
-    cliff_model.eval()
-
-    img_h, img_w = img_shape[:2]
-    focal_length = torch.tensor([500.0], device=device, dtype=torch.float32)
-    center = torch.tensor([[img_w / 2.0, img_h / 2.0]], device=device, dtype=torch.float32)
-    scale = torch.tensor([1.0], device=device, dtype=torch.float32)
-    b = scale * 200
-    bbox_info = torch.stack([center[:, 0] - img_w / 2.0, center[:, 1] - img_h / 2.0, b], dim=-1)
-    bbox_info[:, :2] = bbox_info[:, :2] / focal_length.unsqueeze(-1) * 2.8
-    bbox_info[:, 2] = (bbox_info[:, 2] - 0.24 * focal_length) / (0.06 * focal_length)
-    full_img_shape = torch.stack((torch.tensor([img_h], device=device, dtype=torch.float32), torch.tensor([img_w], device=device, dtype=torch.float32)), dim=-1)
-
-    # Load the SMPL model.
-    #smpl = SMPL(constants.SMPL_MODEL_DIR, batch_size=1).to(device)
-    smpl = None
-
-    return (device, cliff_model, bbox_info, smpl)
-
-
 class demo2:
     def run(self, args):
         # Set up the webcam
@@ -91,9 +50,8 @@ class demo2:
         self._test_text = mesh_solver.texture_pad(self._test_text, 0.05, 0.1, (255, 255, 255, 255))
 
         # Load CLIFF and SMPL
-        frame_data = self._cap.read()
-        frame = frame_data['color']        
-        self._device, self._cliff_model, self._bbox_info, self._smpl = create_model(frame.shape)
+        self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        print(f'Using device: {self._device}')
         self._offscreen_renderer.smpl_load_model(self._device)
         with open('./test_msg.txt', 'r') as json_file:
             self._test_msg = json.load(json_file)
