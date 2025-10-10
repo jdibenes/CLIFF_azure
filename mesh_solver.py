@@ -1257,6 +1257,13 @@ class renderer_mesh_paint:
             self._render_target[:, :, 3] = force_alpha
 
 
+class renderer_mesh_identifier:
+    def __init__(self, group, name, kind):
+        self.group = group
+        self.name = name
+        self.kind = kind
+
+
 #------------------------------------------------------------------------------
 # Renderer
 #------------------------------------------------------------------------------
@@ -1269,14 +1276,14 @@ class renderer:
 
     def smpl_load_model(self, model_path, num_betas, device):
         self._smpl_control = smpl_model(model_path, num_betas, device)
-
-    def smpl_get_mesh(self, smpl_params, camera_translation) -> smpl_model_result:
-        return self._smpl_control.to_mesh(smpl_params, camera_translation)
     
     def smpl_load_uv(self, filename_uv, texture_shape):
         self._uv_transform, self._mesh_a_faces, self._mesh_b_faces, self._mesh_b_uv = texture_load_uv(filename_uv)
         self._mesh_b_uvx = texture_uv_to_uvx(self._mesh_b_uv.copy(), texture_shape)
         self._texture_shape = texture_shape
+
+    def smpl_get_mesh(self, smpl_params, camera_translation) -> smpl_model_result:
+        return self._smpl_control.to_mesh(smpl_params, camera_translation)
 
     def camera_get_pose(self):
         return self._scene_control.camera_get_pose()
@@ -1343,108 +1350,110 @@ class renderer:
         mesh_b_tri = mesh_expand(mesh_a_tri, self._uv_transform, self._mesh_b_faces, visual)
         mesh_a_map = smpl_mesh_chart_openpose(mesh_a_tri, joints)
         self._mesh_add(group, name, mesh_a_tri, mesh_b_tri, mesh_a_map, pose)
+        return renderer_mesh_identifier(group, name, 'smpl')
 
     def mesh_add_user(self, group, name, mesh, pose):
         self._mesh_add(group, name, mesh, None, None, pose)
+        return renderer_mesh_identifier(group, name, 'user')
 
-    def mesh_set_pose(self, group, name, pose):
-        self._meshes[group][name][3] = pose
-        self._scene_control.group_item_set_pose(group, name, pose)
+    def mesh_set_pose(self, mesh_id, pose):
+        self._meshes[mesh_id.group][mesh_id.name][3] = pose
+        self._scene_control.group_item_set_pose(mesh_id.group, mesh_id.name, pose)
 
-    def mesh_get_pose(self, group, name):
-        return self._meshes[group][name][3]
+    def mesh_get_pose(self, mesh_id):
+        return self._meshes[mesh_id.group][mesh_id.name][3]
 
-    def mesh_present_smpl(self, group, name):
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
-        self._mesh_present(group, name, mesh_b, pose)
+    def mesh_present_smpl(self, mesh_id):
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
+        self._mesh_present(mesh_id.group, mesh_id.name, mesh_b, pose)
 
-    def mesh_present_user(self, group, name):
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
-        self._mesh_present(group, name, mesh_a, pose)
+    def mesh_present_user(self, mesh_id):
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
+        self._mesh_present(mesh_id.group, mesh_id.name, mesh_a, pose)
 
-    def mesh_remove_item(self, group, name):
-        self._meshes[group].pop(name)
-        self._scene_control.group_item_remove(group, name)
+    def mesh_remove_item(self, mesh_id):
+        self._meshes[mesh_id.group].pop(mesh_id.name)
+        self._scene_control.group_item_remove(mesh_id.group, mesh_id.name)
 
     def mesh_remove_group(self, group):
         self._meshes.pop(group)
         self._scene_control.group_clear(group)
 
-    def mesh_operation_raycast(self, group, name, origin, direction) -> mesh_chart_point:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+    def mesh_operation_raycast(self, mesh_id, origin, direction) -> mesh_chart_point:
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
         local_origin = math_transform_points(origin, pose.T, True)
         local_direction = math_transform_bearings(direction, pose.T, True)
         point, face_index = mesh_raycast(mesh_a, local_origin, local_direction)
         return mesh_chart_point(point, face_index, local_origin, local_direction, None)
 
-    def mesh_operation_closest(self, group, name, origin) -> mesh_chart_point:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+    def mesh_operation_closest(self, mesh_id, origin) -> mesh_chart_point:
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
         local_origin = math_transform_points(origin, pose.T, True)
         point, face_index, _, = mesh_closest(mesh_a, local_origin)
         return mesh_chart_point(point, face_index, local_origin, None, None)
 
-    def smpl_chart_create_frame(self, group, name, region) -> mesh_chart_frame:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+    def smpl_chart_create_frame(self, mesh_id, region) -> mesh_chart_frame:
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
         return chart.create_frame(region)
     
-    def smpl_chart_from_cylindrical(self, group, name, frame, displacement, yaw) -> mesh_chart_point: 
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+    def smpl_chart_from_cylindrical(self, mesh_id, frame, displacement, yaw) -> mesh_chart_point: 
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
         return chart.from_cylindrical(frame, displacement, yaw)
     
-    def smpl_chart_from_spherical(self, group, name, frame, yaw, pitch) -> mesh_chart_point:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+    def smpl_chart_from_spherical(self, mesh_id, frame, yaw, pitch) -> mesh_chart_point:
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
         return chart.from_spherical(frame, yaw, pitch)
     
-    def smpl_chart_to_cylindrical(self, group, name, frame, point) -> mesh_chart_local:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+    def smpl_chart_to_cylindrical(self, mesh_id, frame, point) -> mesh_chart_local:
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
         local_point = math_transform_points(point, pose.T, True)
         return chart.to_cylindrical(frame, local_point)
     
-    def smpl_chart_to_spherical(self, group, name, frame, point) -> mesh_chart_local:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+    def smpl_chart_to_spherical(self, mesh_id, frame, point) -> mesh_chart_local:
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
         local_point = math_transform_points(point, pose.T, True)
         return chart.to_spherical(frame, local_point)
     
-    def smpl_chart_to_pose(self, group, name, frame):
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+    def smpl_chart_to_pose(self, mesh_id, frame):
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
         return chart.to_pose(frame)
 
-    def smpl_paint_brush_solid(self, group, name, anchor, size, color, fill_test=0.0, timeout=0.05, steps=1, tolerance=0) -> bool:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
-        visual, effect = self._cswvfx[group][name]
+    def smpl_paint_brush_solid(self, mesh_id, anchor, size, color, fill_test=0.0, timeout=0.05, steps=1, tolerance=0) -> bool:
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
+        visual, effect = self._cswvfx[mesh_id.group][mesh_id.name]
         effect.brush_create_solid(0, size, color, 0, fill_test)
         effect.task_create_paint_brush(0, mesh_a, mesh_b, anchor.face_index, anchor.point, [0], tolerance)
         effect.task_execute(0, timeout, steps)
         return effect.task_done(0)
     
-    def smpl_paint_brush_gradient(self, group, name, anchor, size, color_center, color_edge, hardness, fill_test=0.0, timeout=0.05, steps=1, tolerance=0) -> bool:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
-        visual, effect = self._cswvfx[group][name]
+    def smpl_paint_brush_gradient(self, mesh_id, anchor, size, color_center, color_edge, hardness, fill_test=0.0, timeout=0.05, steps=1, tolerance=0) -> bool:
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
+        visual, effect = self._cswvfx[mesh_id.group][mesh_id.name]
         effect.brush_create_gradient(1, size, color_center, color_edge, hardness, 0, fill_test)
         effect.task_create_paint_brush(1, mesh_a, mesh_b, anchor.face_index, anchor.point, [1], tolerance)
         effect.task_execute(1, timeout, steps)
         return effect.task_done(1)
     
-    def smpl_paint_decal_solid(self, group, name, anchor, decal, align_prior, angle, scale, double_cover_test=True, fill_test=0.0, timeout=0.05, steps=1, tolerance_decal=0, tolerance_paint=0) -> bool:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
-        visual, effect = self._cswvfx[group][name]
+    def smpl_paint_decal_solid(self, mesh_id, anchor, decal, align_prior, angle, scale, double_cover_test=True, fill_test=0.0, timeout=0.05, steps=1, tolerance_decal=0, tolerance_paint=0) -> bool:
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
+        visual, effect = self._cswvfx[mesh_id.group][mesh_id.name]
         effect.texture_attach(0, decal)
         effect.decal_create_solid(0, align_prior, angle, scale, 0, 0, double_cover_test, fill_test, tolerance_decal)
         effect.task_create_paint_decal(2, mesh_a, mesh_b, anchor.face_index, anchor.point, 0, tolerance_paint)
         effect.task_execute(2, timeout, steps)
         return effect.task_done(2)
     
-    def smpl_paint_decal_align_prior(self, group, name, anchor, align_axis, align_axis_fallback, tolerance=0) -> np.ndarray:
-        mesh_a, mesh_b, chart, pose = self._meshes[group][name]
+    def smpl_paint_decal_align_prior(self, mesh_id, anchor, align_axis, align_axis_fallback, tolerance=0):
+        mesh_a, mesh_b, chart, pose = self._meshes[mesh_id.group][mesh_id.name]
         align_normal = mesh_a.face_normals[anchor.face_index:(anchor.face_index+1), :]
         align_prior, nap = math_normalize(align_axis - (align_normal @ align_axis.T) * align_normal)
         return align_prior if (nap > tolerance) else math_normalize(align_axis_fallback - (align_normal @ align_axis_fallback.T) * align_normal)[0]
     
-    def smpl_paint_clear(self, group, name) -> None:
-        visual, effect = self._cswvfx[group][name]
+    def smpl_paint_clear(self, mesh_id) -> None:
+        visual, effect = self._cswvfx[mesh_id.group][mesh_id.name]
         effect.layer_clear(0)
 
-    def smpl_paint_flush(self, group, name) -> None:
-        visual, effect = self._cswvfx[group][name]
+    def smpl_paint_flush(self, mesh_id) -> None:
+        visual, effect = self._cswvfx[mesh_id.group][mesh_id.name]
         effect.flush()
 
