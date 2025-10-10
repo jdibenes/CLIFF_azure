@@ -7,6 +7,15 @@ import torch
 import mesh_solver
 
 
+def smpl_unpack(person_list, device):
+    global_orient = torch.tensor([person['smpl_params']['global_orient'] for person in person_list], dtype=torch.float32, device=device)
+    body_pose = torch.tensor([person['smpl_params']['body_pose'] for person in person_list], dtype=torch.float32, device=device)
+    betas = torch.tensor([person['smpl_params']['betas'] for person in person_list], dtype=torch.float32, device=device)
+    smpl_params = { 'global_orient' : global_orient, 'body_pose' : body_pose, 'betas' : betas }
+    camera_translation = torch.tensor([person['camera_translation'] for person in person_list], dtype=torch.float32, device=device)
+    return smpl_params, camera_translation
+
+
 class demo:
     def run(self):
         # Create offscreen renderer
@@ -22,9 +31,8 @@ class demo:
         self._offscreen_renderer = mesh_solver.renderer(cfg_offscreen, cfg_scene, cfg_camera, cfg_camera_transform, cfg_lamp)
 
         # Load textures and UV map
-        tex_filename = './data/textures/f_01_alb.002_1k.png'
-        #tex_filename = './data/textures/smpl_uv_20200910.png'
-        self._texture_array = mesh_solver.texture_load_image(tex_filename)
+        self._texture_array = mesh_solver.texture_load_image('./data/textures/f_01_alb.002_1k.png')
+        self._texture_array_2 = mesh_solver.texture_load_image('./data/textures/smpl_uv_20200910.png', False)
         self._test_stamp = mesh_solver.texture_load_image('./data/textures/stamp_test.jpg')
         self._offscreen_renderer.smpl_load_uv('./data/smpl_uv.obj', self._texture_array.shape)
 
@@ -70,19 +78,29 @@ class demo:
 
 
     def _loop(self):
-        smpl_params = self._test_msg['persons'][0]['smpl_params']
-        camera_translation = self._test_msg['persons'][0]['camera_translation']
-        smpl_params = { k : torch.tensor([v], dtype=torch.float32, device=self._device) for k, v in smpl_params.items() }
-        camera_translation = torch.tensor([camera_translation], dtype=torch.float32, device=self._device)
+        #msg_smpl_params = self._test_msg['persons'][0]['smpl_params']
+        #msg_camera_translation = self._test_msg['persons'][0]['camera_translation']
 
+        #print(self._test_msg['num_persons'])
+        #print(len(self._test_msg['persons']))
+
+        #smpl_params = { k : torch.tensor([v, v], dtype=torch.float32, device=self._device) for k, v in msg_smpl_params.items() }
+        #camera_translation = torch.tensor([msg_camera_translation, msg_camera_translation], dtype=torch.float32, device=self._device)
+
+        person_list = [self._test_msg['persons'][0], self._test_msg['persons'][0]]
+        smpl_params, camera_translation = smpl_unpack(person_list, self._device)
         vertices, vertices_world, faces, joints, joints_world = self._offscreen_renderer.smpl_get_mesh(smpl_params, camera_translation)
         vertices = vertices[0]
         joints = joints[0]
+        vertices_world = vertices_world[1]
+        joints_world = joints_world[1]
 
-        joints = mesh_solver.smpl_joints_to_openpose(joints)
+        #joints = mesh_solver.smpl_joints_to_openpose(joints)
+        #joints_world = mesh_solver.smpl_joints_to_openpose(joints_world)
 
         # Create mesh
         mesh = mesh_solver.mesh_create(vertices, faces)
+        mesh_world = mesh_solver.mesh_create(vertices_world, faces)
 
         # Compute pose to set mesh upright
         frame_0 = mesh_solver.smpl_mesh_chart_openpose(mesh, joints).create_frame('body_center')
@@ -95,6 +113,7 @@ class demo:
 
         # Add SMPL mesh to the main scene
         self._offscreen_renderer.mesh_add_smpl('smpl', 'patient', mesh, joints, self._texture_array, smpl_mesh_pose)
+        self._offscreen_renderer.mesh_add_smpl('smpl', 'duplicate', mesh_world, joints_world, self._texture_array_2, smpl_mesh_pose)
 
         # Map current cylindrical coordinates to SMPL mesh point and face
         smpl_frame = self._offscreen_renderer.smpl_chart_create_frame('smpl', 'patient', self._regions[self._region_index])
@@ -107,6 +126,7 @@ class demo:
         if (anchor.point is not None):
             self._pose_cone[3:4, :3] = mesh_solver.math_transform_points(anchor.point + 0.04 * anchor.direction, smpl_mesh_pose.T, False)
         else:
+            print('NO HIT')
             # Coordinates outside mesh
             self._pose_cone[3:4, :3] = mesh_solver.math_transform_points(anchor.position, smpl_mesh_pose.T, False)
 
@@ -144,6 +164,7 @@ class demo:
 
         # Add meshes to display, update poses and textures
         self._offscreen_renderer.mesh_present_smpl('smpl', 'patient')
+        self._offscreen_renderer.mesh_present_smpl('smpl', 'duplicate')
         self._offscreen_renderer.mesh_present_user('ui', 'cursor')
         self._offscreen_renderer.mesh_present_user('ui', 'closest')
 
@@ -154,6 +175,7 @@ class demo:
         color, depth = self._offscreen_renderer.scene_render()
         color = color.copy()
         for i in range(0, image_points.shape[0]):
+            # TODO: filter behind camera
             center = (int(image_points[i, 0]), int(image_points[i, 1]))
             color = cv2.circle(color, center, 3, [255, 0, 255], -1)
 
@@ -164,7 +186,9 @@ class demo:
         # Controls
         if (key == 49): # 1
             self._region_index = (self._region_index + 1) % len(self._regions)
-            smpl_frame = self._offscreen_renderer.smpl_chart_create_frame('smpl', 'patient', self._regions[self._region_index])
+            region = self._regions[self._region_index]
+            print(f'region: {region}')
+            smpl_frame = self._offscreen_renderer.smpl_chart_create_frame('smpl', 'patient', region)
             focus_center = mesh_solver.math_transform_points(smpl_frame.center, smpl_mesh_pose.T, False)
             focus_points = mesh_solver.math_transform_points(smpl_frame.points, smpl_mesh_pose.T, False)
             wz = self._offscreen_renderer.camera_solve_fov_z(focus_center, focus_points, False)
