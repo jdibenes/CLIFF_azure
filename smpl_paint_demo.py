@@ -14,6 +14,9 @@
 # Esc: Quit
 #------------------------------------------------------------------------------
 
+import os
+os.environ['PYOPENGL_PLATFORM'] = 'egl'
+
 import time
 import json
 import cv2
@@ -44,7 +47,7 @@ class demo:
         self._camera_use_plane = True
         self._camera_focus_factor = 1.25
 
-        self._text_font_name = 'arial.ttf'
+        self._text_font_name = 'LiberationSerif-Regular.ttf'
         self._text_font_size = 512
         self._text_font_color = (255, 0, 0, 255)
         self._text_canvas_color = (255, 255, 255, 255)
